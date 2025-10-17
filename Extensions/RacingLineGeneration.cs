@@ -1,0 +1,358 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using DLS.Structures;
+
+namespace DLS.Extensions
+{
+    /// <summary>
+    /// Extension methods for racing line generation and spline interpolation
+    /// </summary>
+    public static class RacingLineGeneration
+    {
+        public static void BuildRacingLine(this AccelerationOptimiser optimiser)
+        {
+            var trackCentre = optimiser.TrackCentre;
+            var turns = optimiser.Turns;
+            
+            if (trackCentre == null || trackCentre.Length == 0)
+                throw new InvalidOperationException("Track data not loaded. Call ReadTrackData() first.");
+
+            if (turns == null || turns.Count == 0)
+                throw new InvalidOperationException("Turn analysis not completed. Call AnalyzeTurns() first.");
+
+            Console.WriteLine("Building optimized racing line using spline interpolation...");
+            var startTime = DateTime.Now;
+
+            // Generate key racing points with proper offsets
+            var keyPoints = GenerateKeyRacingPoints(optimiser);
+
+            // Create spline interpolation for smooth racing line
+            var racingLine = InterpolateSplineRacingLine(keyPoints, trackCentre);
+            optimiser.SetRacingLine(racingLine);
+
+            var buildTime = DateTime.Now - startTime;
+            Console.WriteLine($"Racing line built in {buildTime.TotalMilliseconds:F1} ms with {racingLine.Length} points");
+            Console.WriteLine($"Spline interpolates through {keyPoints.Count} key points from optimization markers");
+        }
+
+        private static List<(int index, double x, double y, string type)> GenerateKeyRacingPoints(AccelerationOptimiser optimiser)
+        {
+            // Use the optimization markers that were already generated
+            var keyPoints = new List<(int index, double x, double y, string type)>();
+            var trackCentre = optimiser.TrackCentre;
+            var optimizationMarkers = optimiser.OptimizationMarkers;
+
+            // Convert optimization markers to key points
+            if (optimizationMarkers != null && optimizationMarkers.Length > 0)
+            {
+                Console.WriteLine($"Using {optimizationMarkers.Length} optimization markers for racing line generation");
+                
+                for (int i = 0; i < optimizationMarkers.Length; i++)
+                {
+                    var marker = optimizationMarkers[i];
+                    
+                    // Find corresponding track index by cumulative distance
+                    int trackIndex = FindClosestTrackIndex(marker, trackCentre);
+
+                    keyPoints.Add((trackIndex, marker.X, marker.Y, marker.Type + " " + marker.MarkerNumber.ToString()));
+                }
+            }
+            else
+            {
+                Console.WriteLine("No optimization markers found, generating basic key points from turns");
+                var turns = optimiser.Turns;
+
+                // Fallback: Add key points for each turn (entry, apex, exit)
+                if (turns != null && turns.Count > 0)
+                {
+                    foreach (var turn in turns)
+                    {
+                        // Entry point
+                        var (entryX, entryY) = optimiser.ApplyRacingLineOffset(turn.StartIndex, -0.5);
+                        keyPoints.Add((turn.StartIndex, entryX, entryY, $"Turn Entry"));
+
+                        // Apex point
+                        var (apexX, apexY) = optimiser.ApplyRacingLineOffset(turn.ApexIndex, 0.5);
+                        keyPoints.Add((turn.ApexIndex, apexX, apexY, $"Turn Apex"));
+
+                        // Exit point
+                        var (exitX, exitY) = optimiser.ApplyRacingLineOffset(turn.EndIndex, -0.5);
+                        keyPoints.Add((turn.EndIndex, exitX, exitY, $"Turn Exit"));
+                    }
+                }
+            }
+
+            // Add start and end points if not already included
+            bool hasStart = keyPoints.Any(p => p.index == 0);
+            bool hasEnd = keyPoints.Any(p => p.index == trackCentre.Length - 1);
+
+            if (!hasStart)
+            {
+                keyPoints.Insert(0, (0, trackCentre[0].X, trackCentre[0].Y, "Start"));
+            }
+
+            if (!hasEnd)
+            {
+                int lastIndex = trackCentre.Length - 1;
+                keyPoints.Add((lastIndex, trackCentre[lastIndex].X, trackCentre[lastIndex].Y, "Finish"));
+            }
+
+            // Sort by track index
+            keyPoints.Sort((a, b) => a.index.CompareTo(b.index));
+
+            // Remove duplicates
+            var uniqueKeyPoints = new List<(int index, double x, double y, string type)>();
+            int lastAddedIndex = -1;
+
+            foreach (var point in keyPoints)
+            {
+                if (point.index != lastAddedIndex)
+                {
+                    uniqueKeyPoints.Add(point);
+                    lastAddedIndex = point.index;
+                }
+            }
+
+            Console.WriteLine($"Generated {uniqueKeyPoints.Count} racing line key points with racing line offsets:");
+            foreach (var point in uniqueKeyPoints)
+            {
+                Console.WriteLine($"  Index {point.index}: ({point.x:F2}, {point.y:F2}) - {point.type}");
+            }
+
+            return uniqueKeyPoints;
+        }
+
+        private static LineData[] InterpolateSplineRacingLine(List<(int index, double x, double y, string type)> keyPoints, LineData[] trackCentre)
+        {
+            if (keyPoints.Count < 2)
+                throw new ArgumentException("Need at least 2 key points for spline interpolation");
+
+            Console.WriteLine("Using Catmull-Rom spline interpolation for smooth racing line...");
+            
+            var racingLine = new LineData[trackCentre.Length];
+            var sortedKeyPoints = keyPoints.OrderBy(p => p.index).ToList();
+
+            // Use Catmull-Rom spline interpolation
+            for (int i = 0; i < trackCentre.Length; i++)
+            {
+                double racingX, racingY;
+
+                int segmentIndex = FindSplineSegment(i, sortedKeyPoints);
+                
+                if (segmentIndex == -1)
+                {
+                    racingX = LinearInterpolate(i, sortedKeyPoints, out racingY);
+                }
+                else
+                {
+                    var (x, y) = CatmullRomInterpolate(i, segmentIndex, sortedKeyPoints);
+                    racingX = x;
+                    racingY = y;
+                }
+
+                racingLine[i] = new LineData
+                {
+                    X = racingX,
+                    Y = racingY,
+                    CumulativeDistance = 0.0,
+                    Curvature = 0.0,
+                    TangentDirection = 0.0
+                };
+            }
+
+            CalculateRacingLineProperties(racingLine);
+            Console.WriteLine("Catmull-Rom spline interpolation completed - smooth curves through markers");
+            
+            return racingLine;
+        }
+
+        private static int FindSplineSegment(int trackIndex, List<(int index, double x, double y, string type)> keyPoints)
+        {
+            for (int j = 1; j < keyPoints.Count - 2; j++)
+            {
+                if (trackIndex >= keyPoints[j].index && trackIndex <= keyPoints[j + 1].index)
+                {
+                    return j;
+                }
+            }
+            return -1;
+        }
+
+        private static double LinearInterpolate(int trackIndex, List<(int index, double x, double y, string type)> keyPoints, out double y)
+        {
+            if (trackIndex <= keyPoints[0].index)
+            {
+                y = keyPoints[0].y;
+                return keyPoints[0].x;
+            }
+            
+            if (trackIndex >= keyPoints[keyPoints.Count - 1].index)
+            {
+                y = keyPoints[keyPoints.Count - 1].y;
+                return keyPoints[keyPoints.Count - 1].x;
+            }
+
+            for (int j = 0; j < keyPoints.Count - 1; j++)
+            {
+                if (trackIndex >= keyPoints[j].index && trackIndex <= keyPoints[j + 1].index)
+                {
+                    var p1 = keyPoints[j];
+                    var p2 = keyPoints[j + 1];
+                    
+                    if (p1.index == p2.index)
+                    {
+                        y = p1.y;
+                        return p1.x;
+                    }
+                    
+                    double t = (double)(trackIndex - p1.index) / (p2.index - p1.index);
+                    t = Math.Max(0.0, Math.Min(1.0, t));
+                    
+                    y = p1.y + t * (p2.y - p1.y);
+                    return p1.x + t * (p2.x - p1.x);
+                }
+            }
+            
+            y = keyPoints[0].y;
+            return keyPoints[0].x;
+        }
+
+        private static (double x, double y) CatmullRomInterpolate(int trackIndex, int segmentIndex, 
+                                                                List<(int index, double x, double y, string type)> keyPoints)
+        {
+            var p0 = keyPoints[segmentIndex - 1];
+            var p1 = keyPoints[segmentIndex];
+            var p2 = keyPoints[segmentIndex + 1];
+            var p3 = keyPoints[segmentIndex + 2];
+
+            double t;
+            if (p2.index == p1.index)
+            {
+                t = 0.0;
+            }
+            else
+            {
+                t = (double)(trackIndex - p1.index) / (p2.index - p1.index);
+                t = Math.Max(0.0, Math.Min(1.0, t));
+            }
+
+            double t2 = t * t;
+            double t3 = t2 * t;
+
+            double x = 0.5 * ((2.0 * p1.x) +
+                              (-p0.x + p2.x) * t +
+                              (2.0 * p0.x - 5.0 * p1.x + 4.0 * p2.x - p3.x) * t2 +
+                              (-p0.x + 3.0 * p1.x - 3.0 * p2.x + p3.x) * t3);
+
+            double y = 0.5 * ((2.0 * p1.y) +
+                              (-p0.y + p2.y) * t +
+                              (2.0 * p0.y - 5.0 * p1.y + 4.0 * p2.y - p3.y) * t2 +
+                              (-p0.y + 3.0 * p1.y - 3.0 * p2.y + p3.y) * t3);
+
+            return (x, y);
+        }
+
+        private static void CalculateRacingLineProperties(LineData[] racingLine)
+        {
+            int n = racingLine.Length;
+            
+            // Calculate cumulative distances
+            racingLine[0].CumulativeDistance = 0.0;
+            for (int i = 1; i < n; i++)
+            {
+                double dx = racingLine[i].X - racingLine[i - 1].X;
+                double dy = racingLine[i].Y - racingLine[i - 1].Y;
+                double segmentDistance = Math.Sqrt(dx * dx + dy * dy);
+                racingLine[i].CumulativeDistance = racingLine[i - 1].CumulativeDistance + segmentDistance;
+            }
+
+            // Calculate tangent directions and curvature
+            for (int i = 0; i < n; i++)
+            {
+                int prevIndex = Math.Max(0, i - 1);
+                int nextIndex = Math.Min(n - 1, i + 1);
+
+                double dx = racingLine[nextIndex].X - racingLine[prevIndex].X;
+                double dy = racingLine[nextIndex].Y - racingLine[prevIndex].Y;
+
+                if (prevIndex == nextIndex)
+                {
+                    racingLine[i].TangentDirection = 0.0;
+                    racingLine[i].Curvature = 0.0;
+                    continue;
+                }
+
+                double standardAngle = Math.Atan2(dy, dx);
+                racingLine[i].TangentDirection = -1 * standardAngle + Math.PI / 2.0;
+
+                // Normalize to [-π, π] range
+                if (racingLine[i].TangentDirection > Math.PI)
+                    racingLine[i].TangentDirection -= 2.0 * Math.PI;
+                else if (racingLine[i].TangentDirection < -Math.PI)
+                    racingLine[i].TangentDirection += 2.0 * Math.PI;
+
+                // Calculate curvature
+                if (i > 0 && i < n - 1)
+                {
+                    double x1 = racingLine[i - 1].X;
+                    double y1 = racingLine[i - 1].Y;
+                    double x2 = racingLine[i].X;
+                    double y2 = racingLine[i].Y;
+                    double x3 = racingLine[i + 1].X;
+                    double y3 = racingLine[i + 1].Y;
+
+                    double area = Math.Abs((x1 * (y2 - y3) + x2 * (y3 - y1) + x3 * (y1 - y2)) / 2.0);
+                    double a = Math.Sqrt((x2 - x1) * (x2 - x1) + (y2 - y1) * (y2 - y1));
+                    double b = Math.Sqrt((x3 - x2) * (x3 - x2) + (y3 - y2) * (y3 - y2));
+                    double c = Math.Sqrt((x1 - x3) * (x1 - x3) + (y1 - y3) * (y1 - y3));
+
+                    if (a > 1e-10 && b > 1e-10 && c > 1e-10 && area > 1e-10)
+                    {
+                        double radius = (a * b * c) / (4.0 * area);
+                        racingLine[i].Curvature = 1.0 / radius;
+
+                        double v1x = x2 - x1, v1y = y2 - y1;
+                        double v2x = x3 - x2, v2y = y3 - y2;
+                        double crossProduct = v1x * v2y - v1y * v2x;
+
+                        if (crossProduct < 0)
+                            racingLine[i].Curvature = Math.Abs(racingLine[i].Curvature);
+                        else
+                            racingLine[i].Curvature = -Math.Abs(racingLine[i].Curvature);
+                    }
+                    else
+                    {
+                        racingLine[i].Curvature = 0.0;
+                    }
+                }
+                else
+                {
+                    racingLine[i].Curvature = 0.0;
+                }
+            }
+
+            Console.WriteLine($"Racing line properties calculated: total length = {racingLine[n - 1].CumulativeDistance:F2}m");
+        }
+
+        private static int FindClosestTrackIndex(Marker marker, LineData[] trackCentre)
+        {
+            // Find the track index that has the closest cumulative distance to the marker
+            double targetDistance = marker.CumulativeDistance;
+            int closestIndex = 0;
+            double closestDistanceDiff = Math.Abs(trackCentre[0].CumulativeDistance - targetDistance);
+
+            for (int i = 1; i < trackCentre.Length; i++)
+            {
+                double distanceDiff = Math.Abs(trackCentre[i].CumulativeDistance - targetDistance);
+                if (distanceDiff < closestDistanceDiff)
+                {
+                    closestDistanceDiff = distanceDiff;
+                    closestIndex = i;
+                }
+            }
+
+            return closestIndex;
+        }
+    }
+}

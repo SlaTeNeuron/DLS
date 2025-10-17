@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Exclude Python files from the project -->
+    <Compile Remove="**/*.py" />
+    <None Remove="**/*.py" />
+    
+    <!-- Also exclude Python-generated files -->
+    <None Remove="**/*.png" />
+    <None Remove="**/__pycache__/**" />
+
+    <Compile Remove="AccelerationOptimiser real copy.cs" />
+  
+  </ItemGroup>
+
+</Project>
