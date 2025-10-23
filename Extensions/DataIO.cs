@@ -382,17 +382,17 @@ namespace DLS.Extensions
                     if (i == 0)
                     {
                         prevIndex = 0;     // Use current point
-                        nextIndex = 1;     // Use next point
+                        nextIndex = 5;     // Use next point
                     }
                     else if (i == n - 1)
                     {
-                        prevIndex = n - 2; // Use previous point
+                        prevIndex = n - 6; // Use previous point
                         nextIndex = n - 1; // Use current point
                     }
                     else
                     {
-                        prevIndex = i - 1;
-                        nextIndex = i + 1;
+                        prevIndex = i - 5;
+                        nextIndex = i + 5;
                     }
                 }
 
@@ -404,13 +404,13 @@ namespace DLS.Extensions
                     // For open track endpoints, use single-sided difference
                     if (i == 0)
                     {
-                        dx = trackCentre[1].X - trackCentre[0].X;
-                        dy = trackCentre[1].Y - trackCentre[0].Y;
+                        dx = trackCentre[5].X - trackCentre[0].X;
+                        dy = trackCentre[5].Y - trackCentre[0].Y;
                     }
                     else // i == n - 1
                     {
-                        dx = trackCentre[n - 1].X - trackCentre[n - 2].X;
-                        dy = trackCentre[n - 1].Y - trackCentre[n - 2].Y;
+                        dx = trackCentre[n - 1].X - trackCentre[n - 6].X;
+                        dy = trackCentre[n - 1].Y - trackCentre[n - 6].Y;
                     }
                 }
                 else

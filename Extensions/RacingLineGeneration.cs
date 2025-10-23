@@ -28,7 +28,7 @@ namespace DLS.Extensions
             var keyPoints = GenerateKeyRacingPoints(optimiser);
 
             // Create spline interpolation for smooth racing line
-            var racingLine = InterpolateSplineRacingLine(keyPoints, trackCentre);
+            var racingLine = InterpolateSplineRacingLine(optimiser, keyPoints, trackCentre);
             optimiser.SetRacingLine(racingLine);
 
             var buildTime = DateTime.Now - startTime;
@@ -123,7 +123,7 @@ namespace DLS.Extensions
             return uniqueKeyPoints;
         }
 
-        private static LineData[] InterpolateSplineRacingLine(List<(int index, double x, double y, string type)> keyPoints, LineData[] trackCentre)
+        private static LineData[] InterpolateSplineRacingLine(this AccelerationOptimiser optimiser, List<(int index, double x, double y, string type)> keyPoints, LineData[] trackCentre)
         {
             if (keyPoints.Count < 2)
                 throw new ArgumentException("Need at least 2 key points for spline interpolation");
@@ -161,7 +161,7 @@ namespace DLS.Extensions
                 };
             }
 
-            CalculateRacingLineProperties(racingLine);
+            CalculateRacingLineProperties(optimiser, racingLine);
             Console.WriteLine("Catmull-Rom spline interpolation completed - smooth curves through markers");
             
             return racingLine;
@@ -253,7 +253,7 @@ namespace DLS.Extensions
             return (x, y);
         }
 
-        private static void CalculateRacingLineProperties(LineData[] racingLine)
+        private static void CalculateRacingLineProperties(this AccelerationOptimiser optimiser, LineData[] racingLine)
         {
             int n = racingLine.Length;
             
@@ -270,8 +270,8 @@ namespace DLS.Extensions
             // Calculate tangent directions and curvature
             for (int i = 0; i < n; i++)
             {
-                int prevIndex = Math.Max(0, i - 1);
-                int nextIndex = Math.Min(n - 1, i + 1);
+                int prevIndex = (int)Math.Max(0, i - 5 * optimiser.IndicesPerMeter);
+                int nextIndex = (int)Math.Min(n - 1, i + 5 * optimiser.IndicesPerMeter);
 
                 double dx = racingLine[nextIndex].X - racingLine[prevIndex].X;
                 double dy = racingLine[nextIndex].Y - racingLine[prevIndex].Y;
@@ -295,12 +295,12 @@ namespace DLS.Extensions
                 // Calculate curvature
                 if (i > 0 && i < n - 1)
                 {
-                    double x1 = racingLine[i - 1].X;
-                    double y1 = racingLine[i - 1].Y;
+                    double x1 = racingLine[prevIndex].X;
+                    double y1 = racingLine[prevIndex].Y;
                     double x2 = racingLine[i].X;
                     double y2 = racingLine[i].Y;
-                    double x3 = racingLine[i + 1].X;
-                    double y3 = racingLine[i + 1].Y;
+                    double x3 = racingLine[nextIndex].X;
+                    double y3 = racingLine[nextIndex].Y;
 
                     double area = Math.Abs((x1 * (y2 - y3) + x2 * (y3 - y1) + x3 * (y1 - y2)) / 2.0);
                     double a = Math.Sqrt((x2 - x1) * (x2 - x1) + (y2 - y1) * (y2 - y1));

@@ -95,8 +95,11 @@ namespace DLS.Extensions
                 }
             }
 
+            int trueStartIndex = turn.StartIndex;
+            int trueEndIndex = turn.EndIndex;
+
             // Propagate backwards from apex - ensure we can brake to apex speed
-            for (int i = turn.ApexIndex - 1; i >= turn.StartIndex; i--)
+            for (int i = turn.ApexIndex - 1; Math.Abs(racingLine[i].Curvature) <= Math.Abs(turn.MaxCurvature * 0.05); i--)
             {
                 double distance = racingLine[i + 1].CumulativeDistance - racingLine[i].CumulativeDistance;
                 if (distance > 0)
@@ -120,18 +123,19 @@ namespace DLS.Extensions
 
                     if (curvature > 0.0001)
                     {
-                        profile.LateralGs[i] = (profile.Speeds[i] * profile.Speeds[i] * curvature) / 9.81;
+                        profile.LateralGs[i] = (profile.Speeds[i] * profile.Speeds[i] * racingLine[i].Curvature) / 9.81;
                     }
 
-                    if (profile.Speeds[i] < oldSpeed - 0.01)
+                    if (profile.Speeds[i] < oldSpeed)
                     {
                         profile.LongitudinalGs[i] = -availableBrakingG;
                     }
                 }
+                trueStartIndex = i;
             }
 
             // Propagate forwards from apex - ensure we can accelerate from apex speed
-            for (int i = turn.ApexIndex + 1; i <= turn.EndIndex; i++)
+            for (int i = turn.ApexIndex + 1; Math.Abs(racingLine[i].Curvature) <= Math.Abs(turn.MaxCurvature * 0.05); i++)
             {
                 double distance = racingLine[i].CumulativeDistance - racingLine[i - 1].CumulativeDistance;
                 if (distance > 0)
@@ -155,22 +159,23 @@ namespace DLS.Extensions
 
                     if (curvature > 0.0001)
                     {
-                        profile.LateralGs[i] = (profile.Speeds[i] * profile.Speeds[i] * curvature) / 9.81;
+                        profile.LateralGs[i] = (profile.Speeds[i] * profile.Speeds[i] * racingLine[i].Curvature) / 9.81;
                     }
 
-                    if (profile.Speeds[i] < maxSpeedFromAccel - 0.01)
+                    if (profile.Speeds[i] == oldSpeed)
                     {
                         profile.LongitudinalGs[i] = 0.0;
                     }
-                    else if (profile.Speeds[i] > profile.Speeds[i - 1] + 0.01)
+                    else if (profile.Speeds[i] > profile.Speeds[i - 1])
                     {
                         profile.LongitudinalGs[i] = availableAccelG;
                     }
                 }
+                trueEndIndex = i;
             }
 
             // Extend braking zone backwards beyond corner start
-            for (int i = turn.StartIndex - 1; i >= 0; i--)
+            for (int i = trueStartIndex - 1; i >= 0; i--)
             {
                 double distance = racingLine[i + 1].CumulativeDistance - racingLine[i].CumulativeDistance;
                 if (distance > 0)
@@ -181,13 +186,14 @@ namespace DLS.Extensions
 
                     profile.Speeds[i] = Math.Min(profile.Speeds[i], maxSpeedFromBraking);
                 }
+
                 profile.LongitudinalGs[i] = -maxBrakingG;
 
                 if (profile.Speeds[i] >= terminalSpeedMs * 0.99) break;
             }
 
             // Extend acceleration zone forwards beyond corner exit
-            for (int i = turn.EndIndex + 1; i < racingLine.Length; i++)
+            for (int i = trueEndIndex + 1; i < racingLine.Length; i++)
             {
                 double distance = racingLine[i].CumulativeDistance - racingLine[i - 1].CumulativeDistance;
                 if (distance > 0)
