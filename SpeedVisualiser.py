@@ -16,6 +16,11 @@ x = data['X'].values
 y = data['Y'].values
 velocities_mph = data['Velocity_mph'].values
 
+# Track limit data
+track_x = data['trackX'].values
+track_y = data['trackY'].values
+track_tangent_direction = data['trackTangentDirection'].values
+
 # Filter data to only show points within ±30m on x-axis
 x_limit = 30.0
 mask = (x >= -x_limit) & (x <= x_limit)
@@ -23,7 +28,24 @@ x_filtered = x[mask]
 y_filtered = y[mask]
 velocities_filtered = velocities_mph[mask]
 
+# Filter track data using the same mask
+track_x_filtered = track_x[mask]
+track_y_filtered = track_y[mask]
+track_tangent_filtered = track_tangent_direction[mask]
+
 print(f'Filtering track data: showing {len(x_filtered)} of {len(x)} points within ±{x_limit}m')
+
+# Calculate track limits (±150cm = ±1.5m from track centerline)
+track_width_half = 1.5  # 150cm in meters
+
+# Calculate perpendicular direction (tangent + pi/2)
+perp_direction = -track_tangent_filtered
+
+# Calculate track limit coordinates
+left_limit_x = track_x_filtered + track_width_half * np.cos(perp_direction)
+left_limit_y = track_y_filtered + track_width_half * np.sin(perp_direction)
+right_limit_x = track_x_filtered - track_width_half * np.cos(perp_direction)
+right_limit_y = track_y_filtered - track_width_half * np.sin(perp_direction)
 
 # Create color map from blue (slow) to red (fast)
 colors = ['#0000FF', '#00FFFF', '#00FF00', '#FFFF00', '#FF8000', '#FF0000']
@@ -35,9 +57,13 @@ points = np.array([x_filtered, y_filtered]).T.reshape(-1, 1, 2)
 segments = np.concatenate([points[:-1], points[1:]], axis=1)
 
 from matplotlib.collections import LineCollection
-lc = LineCollection(segments, cmap=cmap, linewidths=3)
+lc = LineCollection(segments, cmap=cmap, linewidths=2)
 lc.set_array(velocities_filtered[:-1])  # Use velocity for coloring
 line = ax1.add_collection(lc)
+
+# Plot track limits
+ax1.plot(left_limit_x, left_limit_y, 'k--', linewidth=0.5, alpha=0.7, label='Track Limits')
+ax1.plot(right_limit_x, right_limit_y, 'k--', linewidth=0.5, alpha=0.7)
 
 # Set plot properties with fixed x-axis limits
 ax1.set_xlim(-x_limit, x_limit)
@@ -45,8 +71,9 @@ ax1.set_ylim(y_filtered.min() - 5, y_filtered.max() + 5)
 ax1.set_aspect('equal', adjustable='box')
 ax1.set_xlabel('X Position (m)')
 ax1.set_ylabel('Y Position (m)')
-ax1.set_title(f'Racing Line - Speed Visualization (±{x_limit}m view)\n(Blue=Slow, Red=Fast)')
+ax1.set_title(f'Racing Line with Track Limits (±{x_limit}m view)\n(Blue=Slow, Red=Fast, Track Width=3m)')
 ax1.grid(True, alpha=0.3)
+ax1.legend(loc='upper right')
 
 # Add colorbar
 cbar = fig.colorbar(line, ax=ax1, shrink=0.8)

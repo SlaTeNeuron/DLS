@@ -63,6 +63,10 @@ namespace DLS.Extensions
         {
             const double terminalSpeedMph = 100.0;
             const double terminalSpeedMs = terminalSpeedMph * 0.44704;
+            bool isRightTurn = racingLine[turn.ApexIndex].Curvature > 0;
+            double maxLateralG = optimiser.GetMaxLateralGForTurn(isRightTurn);
+            int trueStartIndex = turn.StartIndex;
+            int trueEndIndex = turn.EndIndex;
 
             var profile = new SpeedProfile
             {
@@ -80,26 +84,29 @@ namespace DLS.Extensions
                 profile.LongitudinalGs[i] = 0.0;
             }
 
+            for (int i = turn.ApexIndex - 1; i >= 0 && Math.Abs(racingLine[i].Curvature) >= Math.Abs(turn.MaxCurvature * 0.05); i--)
+            {
+                trueStartIndex = i;
+            }
+            for (int i = turn.ApexIndex + 1; i < racingLine.Length && Math.Abs(racingLine[i].Curvature) >= Math.Abs(turn.MaxCurvature * 0.05); i++)
+            {
+                trueEndIndex = i;
+            }
+
             // Calculate curvature-limited speeds
-            for (int i = turn.StartIndex; i <= turn.EndIndex; i++)
+            for (int i = trueStartIndex; i <= trueEndIndex; i++)
             {
                 double curvature = Math.Abs(racingLine[i].Curvature);
                 if (curvature > 0.0001)
                 {
-                    bool isRightTurn = racingLine[i].Curvature > 0;
-                    double maxLateralG = optimiser.GetMaxLateralGForTurn(isRightTurn);
-
                     double maxSpeed = Math.Sqrt(maxLateralG * 9.81 / curvature);
                     profile.Speeds[i] = Math.Min(profile.Speeds[i], maxSpeed);
                     profile.LateralGs[i] = maxLateralG;
                 }
             }
 
-            int trueStartIndex = turn.StartIndex;
-            int trueEndIndex = turn.EndIndex;
-
             // Propagate backwards from apex - ensure we can brake to apex speed
-            for (int i = turn.ApexIndex - 1; Math.Abs(racingLine[i].Curvature) <= Math.Abs(turn.MaxCurvature * 0.05); i--)
+            for (int i = turn.ApexIndex - 1; i >= trueStartIndex; i--)
             {
                 double distance = racingLine[i + 1].CumulativeDistance - racingLine[i].CumulativeDistance;
                 if (distance > 0)
@@ -119,23 +126,25 @@ namespace DLS.Extensions
                         2 * availableBrakingG * 9.81 * distance);
 
                     double oldSpeed = profile.Speeds[i];
-                    profile.Speeds[i] = Math.Min(profile.Speeds[i], maxSpeedFromBraking);
+                    profile.Speeds[i] = Math.Max(profile.Speeds[i], maxSpeedFromBraking);
+
+                    //System.Console.WriteLine($"{profile.Speeds[i] * profile.Speeds[i] * racingLine[i].Curvature / 9.81} at index {i}");
+                    //System.Console.WriteLine($"{availableBrakingG} at index {i}");
 
                     if (curvature > 0.0001)
                     {
                         profile.LateralGs[i] = (profile.Speeds[i] * profile.Speeds[i] * racingLine[i].Curvature) / 9.81;
                     }
-
                     if (profile.Speeds[i] < oldSpeed)
                     {
                         profile.LongitudinalGs[i] = -availableBrakingG;
+                        //System.Console.WriteLine($"{-availableBrakingG} at index {i}");
                     }
                 }
-                trueStartIndex = i;
             }
 
             // Propagate forwards from apex - ensure we can accelerate from apex speed
-            for (int i = turn.ApexIndex + 1; Math.Abs(racingLine[i].Curvature) <= Math.Abs(turn.MaxCurvature * 0.05); i++)
+            for (int i = turn.ApexIndex + 1; i < trueEndIndex; i++)
             {
                 double distance = racingLine[i].CumulativeDistance - racingLine[i - 1].CumulativeDistance;
                 if (distance > 0)
@@ -155,7 +164,7 @@ namespace DLS.Extensions
                         2 * availableAccelG * 9.81 * distance);
 
                     double oldSpeed = profile.Speeds[i];
-                    profile.Speeds[i] = Math.Min(profile.Speeds[i], maxSpeedFromAccel);
+                    profile.Speeds[i] = Math.Max(profile.Speeds[i], maxSpeedFromAccel);
 
                     if (curvature > 0.0001)
                     {
@@ -171,7 +180,6 @@ namespace DLS.Extensions
                         profile.LongitudinalGs[i] = availableAccelG;
                     }
                 }
-                trueEndIndex = i;
             }
 
             // Extend braking zone backwards beyond corner start
@@ -184,7 +192,7 @@ namespace DLS.Extensions
                         profile.Speeds[i + 1] * profile.Speeds[i + 1] +
                         2 * maxBrakingG * 9.81 * distance);
 
-                    profile.Speeds[i] = Math.Min(profile.Speeds[i], maxSpeedFromBraking);
+                    profile.Speeds[i] = Math.Max(profile.Speeds[i], maxSpeedFromBraking);
                 }
 
                 profile.LongitudinalGs[i] = -maxBrakingG;
@@ -202,7 +210,7 @@ namespace DLS.Extensions
                         profile.Speeds[i - 1] * profile.Speeds[i - 1] +
                         2 * maxAccelG * 9.81 * distance);
 
-                    profile.Speeds[i] = Math.Min(profile.Speeds[i], maxSpeedFromAccel);
+                    profile.Speeds[i] = Math.Max(profile.Speeds[i], maxSpeedFromAccel);
                 }
                 profile.LongitudinalGs[i] = maxAccelG;
 

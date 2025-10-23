@@ -279,6 +279,7 @@ namespace DLS.Extensions
         {
             var racingLine = optimiser.GetRacingLine();
             var optimizationResults = optimiser.GetOptimizationResults();
+            var trackCentre = optimiser.TrackCentre;
             
             if (racingLine == null || optimizationResults == null)
                 throw new InvalidOperationException("Racing line and optimization results must be calculated first.");
@@ -291,15 +292,17 @@ namespace DLS.Extensions
 
             using (var writer = new StreamWriter(outputPath))
             {
-                writer.WriteLine("X,Y,Velocity_ms,Velocity_mph,Time_s,CumulativeDistance,Curvature,LateralG,LongitudinalG,TotalG");
+                writer.WriteLine("X,Y,Velocity_ms,Velocity_mph,Time_s,CumulativeDistance,Curvature,LateralG,LongitudinalG,TotalG,trackX,trackY,trackTangentDirection");
 
                 for (int i = 0; i < racingLine.Length; i++)
                 {
                     double velocityMph = speeds[i] * 2.237;
                     var result = optimizationResults[i];
+                    var trackPoint = trackCentre != null && i < trackCentre.Length ? trackCentre[i] : new LineData();
                     writer.WriteLine($"{racingLine[i].X:F6},{racingLine[i].Y:F6},{speeds[i]:F3},{velocityMph:F1}," +
                                    $"{times[i]:F3},{racingLine[i].CumulativeDistance:F2},{racingLine[i].Curvature:F6}," +
-                                   $"{result.LateralG:F6},{result.LongitudinalG:F6},{result.TotalG:F6}");
+                                   $"{result.LateralG:F6},{result.LongitudinalG:F6},{result.TotalG:F6}," +
+                                   $"{trackPoint.X:F6},{trackPoint.Y:F6},{trackPoint.TangentDirection:F6}");
                 }
             }
 
@@ -341,6 +344,7 @@ namespace DLS.Extensions
             }
 
             int n = trackCentre.Length;
+            System.Console.WriteLine(n);
 
             // Check if track is a closed loop
             double startX = trackCentre[0].X;
@@ -378,22 +382,8 @@ namespace DLS.Extensions
                 }
                 else
                 {
-                    // Handle boundaries for open tracks
-                    if (i == 0)
-                    {
-                        prevIndex = 0;     // Use current point
-                        nextIndex = 5;     // Use next point
-                    }
-                    else if (i == n - 1)
-                    {
-                        prevIndex = n - 6; // Use previous point
-                        nextIndex = n - 1; // Use current point
-                    }
-                    else
-                    {
-                        prevIndex = i - 5;
-                        nextIndex = i + 5;
-                    }
+                    prevIndex = Math.Max(i - 5, 0);
+                    nextIndex = Math.Min(i + 5, n - 1);
                 }
 
                 // Calculate tangent direction using adjacent points
