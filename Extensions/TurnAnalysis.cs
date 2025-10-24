@@ -350,7 +350,6 @@ namespace DLS.Extensions
                             if (turn.IsChicaneStart)
                             {
                                 segmentOffset = (bestIndex - turn.EndIndex) / (double)(3 * (turn.EndIndex - turn.ApexIndex)) - 2.0 / 3.0;
-                                System.Console.WriteLine(segmentOffset + " " + markerCount);
                             }
                             else
                             {

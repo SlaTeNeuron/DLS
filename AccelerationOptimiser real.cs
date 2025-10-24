@@ -499,10 +499,41 @@ namespace DLS
 
             double maxLongitudinalG = 0.0;
 
+            // Determine the relevant quadrant based on braking state and lateral G direction
+            double minAngle, maxAngle;
+            if (isBraking && requiredLateralG > 0)
+            {
+                // Braking with right turn (positive lateral G): π/2 to π
+                minAngle = Math.PI / 2;
+                maxAngle = Math.PI;
+            }
+            else if (isBraking && requiredLateralG < 0)
+            {
+                // Braking with left turn (negative lateral G): -π/2 to -π
+                minAngle = -Math.PI;
+                maxAngle = -Math.PI / 2;
+            }
+            else if (!isBraking && requiredLateralG > 0)
+            {
+                // Accelerating with right turn (positive lateral G): 0 to π/2
+                minAngle = 0;
+                maxAngle = Math.PI / 2;
+            }
+            else // !isBraking && requiredLateralG < 0
+            {
+                // Accelerating with left turn (negative lateral G): -π/2 to 0
+                minAngle = -Math.PI / 2;
+                maxAngle = 0;
+            }
+
             // Search through GG data to find the maximum longitudinal G available
-            // when the required lateral G is being used
+            // when the required lateral G is being used, only in the relevant quadrant
             foreach (var gg in ggData)
             {
+                // Skip if not in the relevant quadrant
+                if (gg.Angle < minAngle || gg.Angle > maxAngle)
+                    continue;
+
                 var (longitudinalG, lateralG) = gg.GetXYComponents();
 
                 // Check if this point provides sufficient lateral G
@@ -511,8 +542,8 @@ namespace DLS
                     if (isBraking)
                     {
                         // For braking, we want maximum negative longitudinal G
-                        if (longitudinalG < -maxLongitudinalG)
-                            maxLongitudinalG = Math.Abs(longitudinalG);
+                        if (longitudinalG < maxLongitudinalG)
+                            maxLongitudinalG = longitudinalG;
                     }
                     else
                     {
@@ -523,7 +554,7 @@ namespace DLS
                 }
             }
 
-            return maxLongitudinalG >= 0 ? maxLongitudinalG : (isBraking ? 1.0 : 1.0);
+            return maxLongitudinalG;
         }
 
         private (double maxAccel, double maxBraking, double maxLateral) GetGGLimits()

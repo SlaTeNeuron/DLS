@@ -2,6 +2,7 @@ using System;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
+using System.Xml;
 using DLS.Structures;
 
 namespace DLS.Extensions
@@ -41,7 +42,7 @@ namespace DLS.Extensions
             });
 
             // Resolve conflicts between overlapping profiles
-            var (finalSpeedProfile, finalLateralGs, finalLongitudinalGs) = ResolveSpeedAndGForceConflicts(speedProfiles, racingLine, maxAccelG);
+            var (finalSpeedProfile, finalLateralGs, finalLongitudinalGs) = ResolveSpeedAndGForceConflicts(optimiser, speedProfiles, racingLine, maxAccelG);
 
             // Apply final speed profile to racing line
             ApplySpeedProfileToRacingLine(finalSpeedProfile, turns.ToArray());
@@ -67,6 +68,8 @@ namespace DLS.Extensions
             double maxLateralG = optimiser.GetMaxLateralGForTurn(isRightTurn);
             int trueStartIndex = turn.StartIndex;
             int trueEndIndex = turn.EndIndex;
+            int maxBrakeCurveIndex = turn.ApexIndex, maxAccelCurveIndex = turn.ApexIndex;
+
 
             var profile = new SpeedProfile
             {
@@ -80,17 +83,17 @@ namespace DLS.Extensions
             for (int i = 0; i < profile.Speeds.Length; i++)
             {
                 profile.Speeds[i] = terminalSpeedMs;
-                profile.LateralGs[i] = 0.0;
-                profile.LongitudinalGs[i] = 0.0;
             }
 
             for (int i = turn.ApexIndex - 1; i >= 0 && Math.Abs(racingLine[i].Curvature) >= Math.Abs(turn.MaxCurvature * 0.05); i--)
             {
                 trueStartIndex = i;
+                maxBrakeCurveIndex = Math.Abs(racingLine[i].Curvature) > Math.Abs(racingLine[maxBrakeCurveIndex].Curvature) ? i : maxBrakeCurveIndex;
             }
             for (int i = turn.ApexIndex + 1; i < racingLine.Length && Math.Abs(racingLine[i].Curvature) >= Math.Abs(turn.MaxCurvature * 0.05); i++)
             {
                 trueEndIndex = i;
+                maxAccelCurveIndex = Math.Abs(racingLine[i].Curvature) > Math.Abs(racingLine[maxAccelCurveIndex].Curvature) ? i : maxAccelCurveIndex;
             }
 
             // Calculate curvature-limited speeds
@@ -101,7 +104,6 @@ namespace DLS.Extensions
                 {
                     double maxSpeed = Math.Sqrt(maxLateralG * 9.81 / curvature);
                     profile.Speeds[i] = Math.Min(profile.Speeds[i], maxSpeed);
-                    profile.LateralGs[i] = maxLateralG;
                 }
             }
 
@@ -113,33 +115,18 @@ namespace DLS.Extensions
                 {
                     double curvature = Math.Abs(racingLine[i].Curvature);
                     double requiredLateralG = 0.0;
-
                     if (curvature > 0.0001 && profile.Speeds[i] > 0.1)
                     {
-                        requiredLateralG = (profile.Speeds[i] * profile.Speeds[i] * curvature) / 9.81;
+                        requiredLateralG = profile.Speeds[i + 1] * profile.Speeds[i + 1] * curvature / 9.81;
                     }
 
-                    double availableBrakingG = optimiser.GetMaxLongitudinalGForLateralG(requiredLateralG, true);
+                    double availableLongitudinalG = optimiser.GetMaxLongitudinalGForLateralG(requiredLateralG, Math.Abs(racingLine[i].Curvature) < Math.Abs(racingLine[i + 1].Curvature));
 
-                    double maxSpeedFromBraking = Math.Sqrt(
-                        profile.Speeds[i + 1] * profile.Speeds[i + 1] +
-                        2 * availableBrakingG * 9.81 * distance);
+                    double maxSpeed = Math.Sqrt(
+                        profile.Speeds[i + 1] * profile.Speeds[i + 1] -
+                        2 * availableLongitudinalG * 9.81 * distance);
 
-                    double oldSpeed = profile.Speeds[i];
-                    profile.Speeds[i] = Math.Max(profile.Speeds[i], maxSpeedFromBraking);
-
-                    //System.Console.WriteLine($"{profile.Speeds[i] * profile.Speeds[i] * racingLine[i].Curvature / 9.81} at index {i}");
-                    //System.Console.WriteLine($"{availableBrakingG} at index {i}");
-
-                    if (curvature > 0.0001)
-                    {
-                        profile.LateralGs[i] = (profile.Speeds[i] * profile.Speeds[i] * racingLine[i].Curvature) / 9.81;
-                    }
-                    if (profile.Speeds[i] < oldSpeed)
-                    {
-                        profile.LongitudinalGs[i] = -availableBrakingG;
-                        //System.Console.WriteLine($"{-availableBrakingG} at index {i}");
-                    }
+                    profile.Speeds[i] = Math.Min(profile.Speeds[i], maxSpeed);
                 }
             }
 
@@ -154,31 +141,16 @@ namespace DLS.Extensions
 
                     if (curvature > 0.0001 && profile.Speeds[i] > 0.1)
                     {
-                        requiredLateralG = (profile.Speeds[i] * profile.Speeds[i] * curvature) / 9.81;
+                        requiredLateralG = profile.Speeds[i - 1] * profile.Speeds[i - 1] * curvature / 9.81;
                     }
 
-                    double availableAccelG = optimiser.GetMaxLongitudinalGForLateralG(requiredLateralG, false);
+                    double availableAccelG = optimiser.GetMaxLongitudinalGForLateralG(requiredLateralG, Math.Abs(racingLine[i].Curvature) > Math.Abs(racingLine[i - 1].Curvature));
 
                     double maxSpeedFromAccel = Math.Sqrt(
                         profile.Speeds[i - 1] * profile.Speeds[i - 1] +
                         2 * availableAccelG * 9.81 * distance);
 
-                    double oldSpeed = profile.Speeds[i];
-                    profile.Speeds[i] = Math.Max(profile.Speeds[i], maxSpeedFromAccel);
-
-                    if (curvature > 0.0001)
-                    {
-                        profile.LateralGs[i] = (profile.Speeds[i] * profile.Speeds[i] * racingLine[i].Curvature) / 9.81;
-                    }
-
-                    if (profile.Speeds[i] == oldSpeed)
-                    {
-                        profile.LongitudinalGs[i] = 0.0;
-                    }
-                    else if (profile.Speeds[i] > profile.Speeds[i - 1])
-                    {
-                        profile.LongitudinalGs[i] = availableAccelG;
-                    }
+                    profile.Speeds[i] = Math.Min(profile.Speeds[i], maxSpeedFromAccel);
                 }
             }
 
@@ -192,10 +164,8 @@ namespace DLS.Extensions
                         profile.Speeds[i + 1] * profile.Speeds[i + 1] +
                         2 * maxBrakingG * 9.81 * distance);
 
-                    profile.Speeds[i] = Math.Max(profile.Speeds[i], maxSpeedFromBraking);
+                    profile.Speeds[i] = Math.Min(profile.Speeds[i], maxSpeedFromBraking);
                 }
-
-                profile.LongitudinalGs[i] = -maxBrakingG;
 
                 if (profile.Speeds[i] >= terminalSpeedMs * 0.99) break;
             }
@@ -210,9 +180,8 @@ namespace DLS.Extensions
                         profile.Speeds[i - 1] * profile.Speeds[i - 1] +
                         2 * maxAccelG * 9.81 * distance);
 
-                    profile.Speeds[i] = Math.Max(profile.Speeds[i], maxSpeedFromAccel);
+                    profile.Speeds[i] = Math.Min(profile.Speeds[i], maxSpeedFromAccel);
                 }
-                profile.LongitudinalGs[i] = maxAccelG;
 
                 if (profile.Speeds[i] >= terminalSpeedMs * 0.99) break;
             }
@@ -220,7 +189,7 @@ namespace DLS.Extensions
             return profile;
         }
 
-        private static (double[] speeds, double[] lateralGs, double[] longitudinalGs) ResolveSpeedAndGForceConflicts(SpeedProfile[] profiles, LineData[] racingLine, double maxAccelG)
+        private static (double[] speeds, double[] lateralGs, double[] longitudinalGs) ResolveSpeedAndGForceConflicts(this AccelerationOptimiser optimiser, SpeedProfile[] profiles, LineData[] racingLine, double maxAccelG)
         {
             var finalSpeeds = new double[racingLine.Length];
             var finalLateralGs = new double[racingLine.Length];
@@ -262,39 +231,13 @@ namespace DLS.Extensions
                         finalSpeeds[i - 1] * finalSpeeds[i - 1] +
                         2 * maxAccelG * 9.81 * distance);
 
-                    double oldSpeed = finalSpeeds[i];
                     finalSpeeds[i] = Math.Min(finalSpeeds[i], maxSpeedFromAccel);
 
-                    double curvature = Math.Abs(racingLine[i].Curvature);
-                    if (curvature > 0.0001)
+                    if (Math.Abs(racingLine[i].Curvature) > 0.0001)
                     {
-                        finalLateralGs[i] = (finalSpeeds[i] * finalSpeeds[i] * curvature) / 9.81;
+                        finalLateralGs[i] = finalSpeeds[i] * finalSpeeds[i] * racingLine[i].Curvature / 9.81;
                     }
-
-                    if (finalSpeeds[i] < oldSpeed - 0.01)
-                    {
-                        finalLongitudinalGs[i] = maxAccelG;
-                    }
-                    else if (finalSpeeds[i] > finalSpeeds[i - 1] + 0.01)
-                    {
-                        double deltaV = finalSpeeds[i] - finalSpeeds[i - 1];
-                        double estimatedTime = distance / ((finalSpeeds[i] + finalSpeeds[i - 1]) / 2.0);
-                        if (estimatedTime > 0)
-                        {
-                            double acceleration = deltaV / estimatedTime;
-                            finalLongitudinalGs[i] = acceleration / 9.81;
-                        }
-                    }
-                    else if (finalSpeeds[i] < finalSpeeds[i - 1] - 0.01)
-                    {
-                        double deltaV = finalSpeeds[i] - finalSpeeds[i - 1];
-                        double estimatedTime = distance / ((finalSpeeds[i] + finalSpeeds[i - 1]) / 2.0);
-                        if (estimatedTime > 0)
-                        {
-                            double deceleration = deltaV / estimatedTime;
-                            finalLongitudinalGs[i] = deceleration / 9.81;
-                        }
-                    }
+                    finalLongitudinalGs[i] = (finalSpeeds[i] * finalSpeeds[i] - finalSpeeds[i - 1] * finalSpeeds[i - 1]) / (2 * distance) / 9.81;
                 }
             }
 
