@@ -238,33 +238,6 @@ namespace DLS.Extensions
 
         #endregion
 
-        private static double CalculateTurnAngle(LineData[] trackCentre, Turn turn)
-        {
-            if (trackCentre == null || turn.StartIndex >= trackCentre.Length || turn.EndIndex >= trackCentre.Length)
-                return 0.0;
-
-            double totalAngle = 0.0;
-            for (int i = turn.StartIndex; i < turn.EndIndex; i++)
-            {
-                int nextIndex = i + 1;
-                if (nextIndex < trackCentre.Length)
-                {
-                    double angle1 = Math.Atan2(trackCentre[i].Y - trackCentre[Math.Max(0, i - 1)].Y, 
-                                             trackCentre[i].X - trackCentre[Math.Max(0, i - 1)].X);
-                    double angle2 = Math.Atan2(trackCentre[nextIndex].Y - trackCentre[i].Y, 
-                                             trackCentre[nextIndex].X - trackCentre[i].X);
-
-                    double angleDiff = angle2 - angle1;
-                    if (angleDiff > Math.PI) angleDiff -= 2 * Math.PI;
-                    if (angleDiff < -Math.PI) angleDiff += 2 * Math.PI;
-
-                    totalAngle += angleDiff;
-                }
-            }
-
-            return Math.Abs(totalAngle);
-        }
-
         #region Marker Generation
 
         public static void GenerateOptimizationMarkers(this AccelerationOptimiser optimiser)
@@ -285,59 +258,51 @@ namespace DLS.Extensions
             {
                 Turn turn = turns[turnIdx];
 
-                double totalCumulativeAngle = CalculateTurnAngle(trackCentre, turn);
-                int segmentCount = Math.Max(1, (int)Math.Ceiling(totalCumulativeAngle / (Math.PI / 8)));
+                int entryMarker = (int)Math.Ceiling(turn.StartIndex / optimiser.IndicesPerMeter);
+                int exitMarker = (int)Math.Floor(turn.EndIndex / optimiser.IndicesPerMeter);
+                int entryIndex = (int)(entryMarker * optimiser.IndicesPerMeter);
+                int exitIndex = (int)(exitMarker * optimiser.IndicesPerMeter);
+                System.Console.WriteLine(entryMarker);
+                System.Console.WriteLine(exitMarker);
 
-                double entryOffset = turn.Direction == "Right" ? -1.0 : 1.0;
-                double exitOffset = turn.Direction == "Right" ? -1.0 : 1.0;
+                int markerCount = exitMarker - entryMarker + 1;
+                System.Console.WriteLine(markerCount);
+
+                double entryOffset = 2 * (turn.ApexIndex - entryIndex) / (double)(turn.ApexIndex - turn.StartIndex) - 1.0;
+                entryOffset *= turn.Direction == "Right" ? -1.0 : 1.0;
+
+                double exitOffset = 2 * (exitIndex - turn.ApexIndex) / (double)(turn.EndIndex - turn.ApexIndex) - 1.0;
+                exitOffset *= turn.Direction == "Right" ? -1.0 : 1.0;
                 double chicaneTransitionOffset = 0.0;
-                int markerCount = 1;
 
                 // Entry marker
-                if (!turn.IsChicaneEnd)
+
+                var (entryX, entryY) = optimiser.ApplyRacingLineOffset(entryIndex, turn.IsChicaneEnd ? chicaneTransitionOffset : entryOffset);
+                markers.Add(new Marker
                 {
-                    var (entryX, entryY) = optimiser.ApplyRacingLineOffset(turn.StartIndex, turn.IsChicaneEnd ? chicaneTransitionOffset : entryOffset);
-                    markers.Add(new Marker
-                    {
-                        X = entryX,
-                        Y = entryY,
-                        CumulativeDistance = trackCentre[turn.StartIndex].CumulativeDistance,
-                        TangentDirection = trackCentre[turn.StartIndex].TangentDirection,
-                        MarkerNumber = null,
-                        Type = turn.IsChicaneEnd ? "Chicane Transition" : "Entry"
-                    });
-                }
+                    X = entryX,
+                    Y = entryY,
+                    CumulativeDistance = trackCentre[entryIndex].CumulativeDistance,
+                    TangentDirection = trackCentre[entryIndex].TangentDirection,
+                    MarkerNumber = null,
+                    Type = turn.IsChicaneEnd ? "Chicane Transition" : "Entry"
+                });
+
 
                 // Curve weight points for long corners
-                if (segmentCount > 2)
+                if (markerCount > 2)
                 {
-                    for (int seg = 1; seg < segmentCount - 1; seg++)
+                    for (int seg = 1; seg < markerCount - 1; seg++)
                     {
-                        double t = (double)seg / (segmentCount - 1);
-                        int targetIndex = turn.StartIndex + (int)(t * (turn.EndIndex - turn.StartIndex));
-
-                        int bestIndex = turn.StartIndex;
-                        double maxCurvature = 0.0;
-                        int searchStart = Math.Max(turn.StartIndex, targetIndex - 2);
-                        int searchEnd = Math.Min(turn.EndIndex, targetIndex + 2);
-
-                        for (int idx = searchStart; idx <= searchEnd; idx++)
-                        {
-                            double curvature = Math.Abs(trackCentre[idx].Curvature);
-                            if (curvature > maxCurvature)
-                            {
-                                maxCurvature = curvature;
-                                bestIndex = idx;
-                            }
-                        }
-
+                        int bestIndex = (int)((entryMarker + seg) * optimiser.IndicesPerMeter);
+                        System.Console.WriteLine(seg);
                         double segmentOffset;
 
                         if (bestIndex < turn.ApexIndex)
                         {
                             if (turn.IsChicaneEnd)
                             {
-                                segmentOffset = (turn.ApexIndex - bestIndex) / (double)(3 * (turn.ApexIndex - turn.StartIndex)) - 1.0;
+                                segmentOffset = (turn.ApexIndex - bestIndex) / (double)(turn.ApexIndex - turn.StartIndex) - 1.0;
                             }
                             else
                             {
@@ -349,7 +314,7 @@ namespace DLS.Extensions
                         {
                             if (turn.IsChicaneStart)
                             {
-                                segmentOffset = (bestIndex - turn.EndIndex) / (double)(3 * (turn.EndIndex - turn.ApexIndex)) - 2.0 / 3.0;
+                                segmentOffset = (bestIndex - turn.EndIndex) / (double)(turn.EndIndex - turn.ApexIndex);
                             }
                             else
                             {
@@ -368,7 +333,7 @@ namespace DLS.Extensions
                             Y = segmentY,
                             CumulativeDistance = trackCentre[bestIndex].CumulativeDistance,
                             TangentDirection = trackCentre[bestIndex].TangentDirection,
-                            MarkerNumber = markerCount++,
+                            MarkerNumber = entryMarker + seg,
                             Type = "Segment"
                         });
                     }
@@ -377,19 +342,22 @@ namespace DLS.Extensions
                 // Exit marker
                 if (!turn.IsChicaneStart)
                 {
-                    var (exitX, exitY) = optimiser.ApplyRacingLineOffset(turn.EndIndex, turn.IsChicaneStart ? chicaneTransitionOffset : exitOffset);
+                    var (exitX, exitY) = optimiser.ApplyRacingLineOffset(exitIndex, turn.IsChicaneStart ? chicaneTransitionOffset : exitOffset);
                     markers.Add(new Marker
                     {
                         X = exitX,
                         Y = exitY,
-                        CumulativeDistance = trackCentre[turn.EndIndex].CumulativeDistance,
-                        TangentDirection = trackCentre[turn.EndIndex].TangentDirection,
+                        CumulativeDistance = trackCentre[exitIndex].CumulativeDistance,
+                        TangentDirection = trackCentre[exitIndex].TangentDirection,
                         MarkerNumber = markerCount++,
                         Type = turn.IsChicaneStart ? "Chicane Transition" : "Exit"
                     });
                 }
             }
-
+            for (int i = 0; i < markers.Count; i++)
+            {
+                System.Console.WriteLine(markers[i].CumulativeDistance);
+            }
             // Store markers in the optimiser
             optimiser.SetOptimizationMarkers(markers.ToArray());
             Console.WriteLine($"Generated {markers.Count} optimization markers for {turns.Count} turns");
@@ -437,9 +405,9 @@ namespace DLS.Extensions
                                      trackCentre[sectionStart].CumulativeDistance;
 
                 // Only add markers for longer straight sections
-                if (sectionLength > 50.0 || i == 0 || i == turns.Count)
+                if (sectionLength > 10.0 || i == 0 || i == turns.Count)
                 {
-                    int numMarkers = Math.Max(1, (int)(sectionLength / 100.0));
+                    int numMarkers = Math.Max(1, (int)(sectionLength / 2.0));
                     if (i == 0 || i == turns.Count)
                     {
                         //numMarkers++;

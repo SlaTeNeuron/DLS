@@ -114,15 +114,8 @@ namespace DLS.Extensions
                 }
             }
 
-            Console.WriteLine($"Generated {uniqueKeyPoints.Count} racing line key points with racing line offsets:");
-            foreach (var point in uniqueKeyPoints)
-            {
-                Console.WriteLine($"  Index {point.index}: ({point.x:F2}, {point.y:F2}) - {point.type}");
-            }
-
             return uniqueKeyPoints;
         }
-
         private static LineData[] InterpolateSplineRacingLine(this AccelerationOptimiser optimiser, List<(int index, double x, double y, string type)> keyPoints, LineData[] trackCentre)
         {
             if (keyPoints.Count < 2)
@@ -270,8 +263,8 @@ namespace DLS.Extensions
             // Calculate tangent directions and curvature
             for (int i = 0; i < n; i++)
             {
-                int prevIndex = (int)Math.Max(0, i - 5 * optimiser.IndicesPerMeter);
-                int nextIndex = (int)Math.Min(n - 1, i + 5 * optimiser.IndicesPerMeter);
+                int prevIndex = (int)Math.Max(0, i - 0.05 * optimiser.IndicesPerMeter);
+                int nextIndex = (int)Math.Min(n - 1, i + 0.05 * optimiser.IndicesPerMeter);
 
                 double dx = racingLine[nextIndex].X - racingLine[prevIndex].X;
                 double dy = racingLine[nextIndex].Y - racingLine[prevIndex].Y;

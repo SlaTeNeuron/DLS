@@ -21,7 +21,7 @@ namespace DLS
         private string trackFile = string.Empty;
         private string ggFile = string.Empty;
         private int chicaneCount = 0;
-        private double indicesPerMeter = 100.0; // Default value, will be set during data processing
+        private int indicesPerMeter = 100; // Default value, will be set during data processing
         #endregion
 
         #region Public Properties and Accessors for Extensions
