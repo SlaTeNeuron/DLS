@@ -39,6 +39,9 @@ namespace DLS
         public void SetOptimizationResults(OptimizationResult[] data) => optimizationResults = data;
         public void SetOptimizationMarkers(Marker[] data) => optimizationMarkers = data;
         public double IndicesPerMeter => indicesPerMeter;
+        public double trackWidth = 3.0; // in meters
+        public double carWidth = 1.0; // in meters
+        public int MarkersPerMeter = 1;
         #endregion
 
         #region Main Entry Point

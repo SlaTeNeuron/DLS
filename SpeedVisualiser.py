@@ -8,6 +8,10 @@ from matplotlib.colors import LinearSegmentedColormap
 print('Loading speed data from OptimizedSpeeds.csv...')
 data = pd.read_csv('OutputData/OptimizedSpeeds.csv')
 
+# Read the optimization markers data
+print('Loading optimization markers from RacingLineMarkers.csv...')
+markers = pd.read_csv('OutputData/RacingLineMarkers.csv')
+
 # Create the plots - 2x2 grid layout
 fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(16, 12))
 
@@ -64,6 +68,17 @@ line = ax1.add_collection(lc)
 # Plot track limits
 ax1.plot(left_limit_x, left_limit_y, 'k--', linewidth=0.5, alpha=0.7, label='Track Limits')
 ax1.plot(right_limit_x, right_limit_y, 'k--', linewidth=0.5, alpha=0.7)
+
+# Plot optimization markers as black dots
+# Filter markers to only show those within the x-axis limits
+markers_x = markers['X'].values
+markers_y = markers['Y'].values
+markers_mask = (markers_x >= -x_limit) & (markers_x <= x_limit)
+markers_x_filtered = markers_x[markers_mask]
+markers_y_filtered = markers_y[markers_mask]
+
+ax1.scatter(markers_x_filtered, markers_y_filtered, c='black', s=1, zorder=5, 
+           label='Optimization Markers', alpha=0.8)
 
 # Set plot properties with fixed x-axis limits
 ax1.set_xlim(-x_limit, x_limit)

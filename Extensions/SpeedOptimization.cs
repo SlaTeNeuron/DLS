@@ -296,6 +296,7 @@ namespace DLS.Extensions
         private static void ExportAndVisualizeSpeeds(AccelerationOptimiser optimiser, double[] speeds, double[] times)
         {
             optimiser.ExportSpeedData(speeds, times);
+            optimiser.ExportOptimizationMarkers();
 
             // Look for Python visualization script
             string sourceDir = Path.GetDirectoryName(System.Reflection.Assembly.GetExecutingAssembly().Location) ?? "";

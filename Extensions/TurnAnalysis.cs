@@ -22,7 +22,7 @@ namespace DLS.Extensions
             var startTime = DateTime.Now;
 
             var turns = new List<Turn>();
-            DetectTurns(trackCentre, turns);
+            DetectTurns(optimiser, trackCentre, turns);
 
             optimiser.SetTurns(turns);
 
@@ -45,7 +45,7 @@ namespace DLS.Extensions
 
         #region Turn Detection Logic
 
-        private static void DetectTurns(LineData[] trackCentre, List<Turn> turns)
+        private static void DetectTurns(this AccelerationOptimiser optimiser, LineData[] trackCentre, List<Turn> turns)
         {
             const double curvatureThreshold = 0.001;
             const int minTurnLength = 10;
@@ -83,23 +83,18 @@ namespace DLS.Extensions
 
                         if (turnLengthPoints >= minTurnLength)
                         {
-                            int apexStart = turnStartIndex, apexEnd = turnStartIndex;
-                            bool apexStarted = false;
-                            for (int j = turnStartIndex; j <= turnEndIndex; j++)
+                            double angleTurned = 0.0;
+                            for (int j = turnEndIndex; j >= turnStartIndex; j--)
                             {
-                                double pointCurvature = Math.Abs(trackCentre[j].Curvature);
-                                if (pointCurvature > 0.9 * maxAbsCurvature)
+                                if (angleTurned < ChicaneAngle(optimiser, Math.Abs(optimiser.TrackCentre[j].Curvature)))
                                 {
-                                    if (!apexStarted)
-                                    {
-                                        apexStart = j;
-                                        apexStarted = true;
-                                    }
-                                    apexEnd = j;
+                                    apexIndex = j;
                                 }
+                                angleTurned += Math.Abs(optimiser.TrackCentre[j].TangentDirection - optimiser.TrackCentre[j - 1].TangentDirection);
+                                if (angleTurned >= Math.PI / 2)
+                                    break;
                             }
-                            apexIndex = (apexStart + apexEnd) / 2;
-                            
+
                             AddChicaneTurnToList(turns, trackCentre, turnStartIndex, apexIndex, turnEndIndex, 
                                                maxAbsCurvature, currentTurnIsRight, true, false, chicaneTransitionIndex);
                         }
@@ -150,6 +145,19 @@ namespace DLS.Extensions
                         
                         if (isChicaneEnd)
                         {
+                            double angleTurned = 0.0;
+                            for (int j = turnStartIndex; j <= turnEndIndex; j++)
+                            {
+                                if (angleTurned < ChicaneAngle(optimiser, Math.Abs(optimiser.TrackCentre[j].Curvature)))
+                                {
+                                    apexIndex = j;
+                                    //System.Console.WriteLine(ChicaneAngle(optimiser, optimiser.TrackCentre[j].Curvature));
+                                }
+                                angleTurned += Math.Abs(optimiser.TrackCentre[j].TangentDirection - optimiser.TrackCentre[j - 1].TangentDirection);
+                                if (angleTurned >= Math.PI / 2)
+                                    break;
+                            }
+                            //System.Console.WriteLine(apexIndex);
                             AddChicaneTurnToList(turns, trackCentre, turnStartIndex, apexIndex, turnEndIndex, 
                                                maxAbsCurvature, currentTurnIsRight, false, true, chicaneTransitionIndex);
                         }
@@ -244,7 +252,8 @@ namespace DLS.Extensions
         {
             var trackCentre = optimiser.TrackCentre;
             var turns = optimiser.Turns;
-            
+            int entryMarker, exitMarker;
+
             if (turns == null || turns.Count == 0)
             {
                 Console.WriteLine("No turns detected. Generating basic straight-line markers.");
@@ -258,26 +267,36 @@ namespace DLS.Extensions
             {
                 Turn turn = turns[turnIdx];
 
-                int entryMarker = (int)Math.Ceiling(turn.StartIndex / optimiser.IndicesPerMeter);
-                int exitMarker = (int)Math.Floor(turn.EndIndex / optimiser.IndicesPerMeter);
-                int entryIndex = (int)(entryMarker * optimiser.IndicesPerMeter);
-                int exitIndex = (int)(exitMarker * optimiser.IndicesPerMeter);
-                System.Console.WriteLine(entryMarker);
-                System.Console.WriteLine(exitMarker);
+                if (turn.IsChicaneStart)
+                {
+                    entryMarker = (int)Math.Ceiling(turn.StartIndex * optimiser.MarkersPerMeter / optimiser.IndicesPerMeter);
+                    exitMarker = (int)Math.Floor(turn.ApexIndex * optimiser.MarkersPerMeter / optimiser.IndicesPerMeter);
+                }
+                else if (turn.IsChicaneEnd)
+                {
+                    entryMarker = (int)Math.Ceiling(turn.ApexIndex * optimiser.MarkersPerMeter / optimiser.IndicesPerMeter);
+                    exitMarker = (int)Math.Floor(turn.EndIndex * optimiser.MarkersPerMeter / optimiser.IndicesPerMeter);
+                }
+                else
+                {
+                    entryMarker = (int)Math.Ceiling(turn.StartIndex * optimiser.MarkersPerMeter / optimiser.IndicesPerMeter);
+                    exitMarker = (int)Math.Floor(turn.EndIndex * optimiser.MarkersPerMeter / optimiser.IndicesPerMeter);
+                }
+                int entryIndex = (int)(entryMarker * optimiser.IndicesPerMeter / optimiser.MarkersPerMeter);
+                int exitIndex = (int)(exitMarker * optimiser.IndicesPerMeter / optimiser.MarkersPerMeter);
 
                 int markerCount = exitMarker - entryMarker + 1;
-                System.Console.WriteLine(markerCount);
+                //System.Console.WriteLine(markerCount);
 
-                double entryOffset = 2 * (turn.ApexIndex - entryIndex) / (double)(turn.ApexIndex - turn.StartIndex) - 1.0;
+                double entryOffset = turn.IsChicaneEnd ? 1.0 - 2 * (turn.EndIndex - entryIndex) / (double)(turn.EndIndex - turn.ApexIndex) : 1.0;
                 entryOffset *= turn.Direction == "Right" ? -1.0 : 1.0;
 
-                double exitOffset = 2 * (exitIndex - turn.ApexIndex) / (double)(turn.EndIndex - turn.ApexIndex) - 1.0;
+                double exitOffset = turn.IsChicaneStart ? 1.0 - 2 * (exitIndex - turn.StartIndex) / (double)(turn.ApexIndex - turn.StartIndex) : 1.0;
                 exitOffset *= turn.Direction == "Right" ? -1.0 : 1.0;
-                double chicaneTransitionOffset = 0.0;
 
                 // Entry marker
 
-                var (entryX, entryY) = optimiser.ApplyRacingLineOffset(entryIndex, turn.IsChicaneEnd ? chicaneTransitionOffset : entryOffset);
+                var (entryX, entryY) = optimiser.ApplyRacingLineOffset(entryIndex, entryOffset);
                 markers.Add(new Marker
                 {
                     X = entryX,
@@ -288,38 +307,22 @@ namespace DLS.Extensions
                     Type = turn.IsChicaneEnd ? "Chicane Transition" : "Entry"
                 });
 
-
-                // Curve weight points for long corners
+                // Intermediate markers
                 if (markerCount > 2)
                 {
                     for (int seg = 1; seg < markerCount - 1; seg++)
                     {
-                        int bestIndex = (int)((entryMarker + seg) * optimiser.IndicesPerMeter);
-                        System.Console.WriteLine(seg);
+                        int bestIndex = (int)((entryMarker + seg) * optimiser.IndicesPerMeter / optimiser.MarkersPerMeter);
                         double segmentOffset;
 
                         if (bestIndex < turn.ApexIndex)
                         {
-                            if (turn.IsChicaneEnd)
-                            {
-                                segmentOffset = (turn.ApexIndex - bestIndex) / (double)(turn.ApexIndex - turn.StartIndex) - 1.0;
-                            }
-                            else
-                            {
-                                segmentOffset = 2 * (turn.ApexIndex - bestIndex) / (double)(turn.ApexIndex - turn.StartIndex) - 1.0;
-                            }
+                            segmentOffset = 2 * (turn.ApexIndex - bestIndex) / (double)(turn.ApexIndex - turn.StartIndex) - 1.0;
                             segmentOffset *= turn.Direction == "Right" ? -1.0 : 1.0;
                         }
                         else if (bestIndex > turn.ApexIndex)
                         {
-                            if (turn.IsChicaneStart)
-                            {
-                                segmentOffset = (bestIndex - turn.EndIndex) / (double)(turn.EndIndex - turn.ApexIndex);
-                            }
-                            else
-                            {
-                                segmentOffset = 2 * (bestIndex - turn.ApexIndex) / (double)(turn.EndIndex - turn.ApexIndex) - 1.0;
-                            }
+                            segmentOffset = 2 * (bestIndex - turn.ApexIndex) / (double)(turn.EndIndex - turn.ApexIndex) - 1.0;
                             segmentOffset *= turn.Direction == "Right" ? -1.0 : 1.0;
                         }
                         else
@@ -334,34 +337,42 @@ namespace DLS.Extensions
                             CumulativeDistance = trackCentre[bestIndex].CumulativeDistance,
                             TangentDirection = trackCentre[bestIndex].TangentDirection,
                             MarkerNumber = entryMarker + seg,
-                            Type = "Segment"
+                            Type = "Corner Segment"
                         });
                     }
                 }
 
                 // Exit marker
-                if (!turn.IsChicaneStart)
+                var (exitX, exitY) = optimiser.ApplyRacingLineOffset(exitIndex, exitOffset);
+                markers.Add(new Marker
                 {
-                    var (exitX, exitY) = optimiser.ApplyRacingLineOffset(exitIndex, turn.IsChicaneStart ? chicaneTransitionOffset : exitOffset);
-                    markers.Add(new Marker
-                    {
-                        X = exitX,
-                        Y = exitY,
-                        CumulativeDistance = trackCentre[exitIndex].CumulativeDistance,
-                        TangentDirection = trackCentre[exitIndex].TangentDirection,
-                        MarkerNumber = markerCount++,
-                        Type = turn.IsChicaneStart ? "Chicane Transition" : "Exit"
-                    });
-                }
-            }
-            for (int i = 0; i < markers.Count; i++)
-            {
-                System.Console.WriteLine(markers[i].CumulativeDistance);
+                    X = exitX,
+                    Y = exitY,
+                    CumulativeDistance = trackCentre[exitIndex].CumulativeDistance,
+                    TangentDirection = trackCentre[exitIndex].TangentDirection,
+                    MarkerNumber = markerCount++,
+                    Type = turn.IsChicaneStart ? "Chicane Transition" : "Exit"
+                });
             }
             // Store markers in the optimiser
             optimiser.SetOptimizationMarkers(markers.ToArray());
             Console.WriteLine($"Generated {markers.Count} optimization markers for {turns.Count} turns");
             AddStraightSectionMarkers(optimiser);
+        }
+
+        private static double CalculateTotalAngleTurned(this AccelerationOptimiser optimiser, Turn turn)
+        {
+            double angleTurned = 0.0;
+            for (int i = turn.StartIndex; i <= turn.EndIndex; i++)
+            {
+                angleTurned += Math.Abs(optimiser.TrackCentre[i].TangentDirection - optimiser.TrackCentre[i - 1].TangentDirection);
+            }
+            return angleTurned;
+        }
+
+        private static double ChicaneAngle(this AccelerationOptimiser optimiser, double curvature)
+        {
+            return Math.Acos(1/(1 + (optimiser.trackWidth-optimiser.carWidth) / 2 * curvature)); // straight line between two arcs w radius = (1/curvature)-(trackWidth-carWidth)/2
         }
 
         private static void AddStraightSectionMarkers(this AccelerationOptimiser optimiser)
@@ -372,80 +383,113 @@ namespace DLS.Extensions
             if (turns == null || turns.Count == 0) return;
 
             var markers = new List<Marker>(optimiser.OptimizationMarkers ?? []);
+            int originalMarkerCount = markers.Count;
+
+            markers.Add(new Marker
+            {
+                X = trackCentre[0].X,
+                Y = trackCentre[0].Y,
+                CumulativeDistance = trackCentre[0].CumulativeDistance,
+                TangentDirection = trackCentre[0].TangentDirection,
+                Type = "Straight"
+            });
+
+            markers.Add(new Marker
+            {
+                X = trackCentre[trackCentre.Length - 1].X,
+                Y = trackCentre[trackCentre.Length - 1].Y,
+                CumulativeDistance = trackCentre[trackCentre.Length - 1].CumulativeDistance,
+                TangentDirection = trackCentre[trackCentre.Length - 1].TangentDirection,
+                Type = "Straight"
+            });
 
             // Add markers for straight sections between turns
             for (int i = 0; i <= turns.Count; i++)
             {
                 int sectionStart, sectionEnd;
-                Turn? upcomingTurn = null;
+                double startOffset, endOffset;
 
                 if (i == 0)
                 {
                     // First section: start of track to first turn
-                    sectionStart = 0;
+                    sectionStart = 1;
                     sectionEnd = turns[0].StartIndex;
-                    upcomingTurn = turns[0];
+                    startOffset = 0.0;
+                    endOffset = turns[0].Direction == "Right" ? -1.0 : 1.0;
                 }
                 else if (i == turns.Count)
                 {
                     // Last section: last turn to end of track
                     sectionStart = turns[i - 1].EndIndex;
                     sectionEnd = trackCentre.Length - 1;
-                    upcomingTurn = null;
+                    startOffset = turns[i - 1].Direction == "Right" ? -1.0 : 1.0;
+                    endOffset = 0.0;
+                }
+                else if (turns[i].IsChicaneEnd && turns[i - 1].IsChicaneStart)
+                {
+                    // Chicane section: between two chicanes
+                    sectionStart = turns[i - 1].ApexIndex;
+                    sectionEnd = turns[i].ApexIndex;
+                    startOffset = turns[i - 1].Direction == "Right" ? 1.0 : -1.0;
+                    endOffset = turns[i].Direction == "Right" ? 1.0 : -1.0;
                 }
                 else
                 {
                     // Middle section: between two turns
                     sectionStart = turns[i - 1].EndIndex;
                     sectionEnd = turns[i].StartIndex;
-                    upcomingTurn = turns[i];
+                    startOffset = turns[i - 1].Direction == "Right" ? -1.0 : 1.0;
+                    endOffset = turns[i].Direction == "Right" ? -1.0 : 1.0;
                 }
 
                 double sectionLength = trackCentre[sectionEnd].CumulativeDistance - 
                                      trackCentre[sectionStart].CumulativeDistance;
 
                 // Only add markers for longer straight sections
-                if (sectionLength > 10.0 || i == 0 || i == turns.Count)
+                if (sectionLength > 5.0 || i == 0 || i == turns.Count)
                 {
-                    int numMarkers = Math.Max(1, (int)(sectionLength / 2.0));
-                    if (i == 0 || i == turns.Count)
+                    //System.Console.WriteLine($"startOffset: {startOffset}, endOffset: {endOffset}");
+                    int firstMarker = (int)Math.Ceiling(sectionStart / optimiser.IndicesPerMeter * optimiser.MarkersPerMeter);
+                    int lastMarker = (int)Math.Floor(sectionEnd / optimiser.IndicesPerMeter * optimiser.MarkersPerMeter);
+                    int refPoint1 = 0, refPoint2 = 0;
+                    int index1 = 10000;
+                    int index2 = 0;
+                    for (int m = 0; m < originalMarkerCount+2; m++)
                     {
-                        //numMarkers++;
+                        int markerIndex = (int)Math.Round(markers[m].CumulativeDistance * optimiser.MarkersPerMeter);
+                        if (markerIndex < index1 && markerIndex >= firstMarker - 1)
+                        {
+                            index1 = markerIndex;
+                            refPoint1 = m;
+                        }
+                        if (markerIndex > index2 && markerIndex <= lastMarker + 1)
+                        {
+                            index2 = markerIndex;
+                            refPoint2 = m;
+                        }
+                        //System.Console.WriteLine(markerIndex + " at " + m);
                     }
-                    for (int j = 1; j <= numMarkers; j++)
-                    {
-                        int markerCount = 0;
-                        double t;
-                        if (i == 0)
-                        {
-                            t = j == 1 ? 0.5 : 0.875;
-                        }
-                        else if (i == turns.Count)
-                        {
-                            t = j == 1 ? 0.5 : 0.25;
-                        }
-                        else
-                        {
-                            t = (double)j / (numMarkers + 1);
-                        }
-                        int markerIndex = sectionStart + (int)(t * (sectionEnd - sectionStart));
+                    //System.Console.WriteLine(firstMarker + " to " + lastMarker);
+                    //System.Console.WriteLine(refPoint1 + ", " + refPoint2);
+                    int numMarkers = lastMarker - firstMarker + 1;
+                    double p1x = markers[refPoint1].X;
+                    double p1y = markers[refPoint1].Y;
+                    double p2x = markers[refPoint2].X;
+                    double p2y = markers[refPoint2].Y;
+                    double grad = (p2y - p1y) / (p2x - p1x);
+                    double intercept = p1y - grad * p1x;
+                    int markerCount = 0;
+                    //System.Console.WriteLine(p1x + ", " + p1y + " to " + p2x + ", " + p2y);
 
-                        // Calculate offset based on upcoming turn (for racing line positioning)
-                        double offset = 0; // Straight sections use center line
-                        //if (t < 0.3) // Near the end of straight before turn
-                        //{
-                            bool isRightTurn = turns[Math.Max(i - 1, 0)].Direction == "Right";
-                            offset = j == 1 ? 0.5 : 0.8;
-                        offset *= isRightTurn ? -1 : 1; // Position for optimal turn entry
-                        //}
-                        /*
-                        if (t > 0.7)
-                        {
-                            bool isRightTurn = turns[i].Direction == "Right";
-                            offset = j == 1 ? 0.5 : 0.93;
-                            offset *= isRightTurn ? -1 : 1; // Position for optimal turn exit
-                        }*/
-                        var (markerX, markerY) = optimiser.ApplyRacingLineOffset(markerIndex, offset);
+                    for (int j = 0; j < numMarkers; j++)
+                    {
+                        int markerIndex = (int)Math.Floor((firstMarker + j) * optimiser.IndicesPerMeter / optimiser.MarkersPerMeter);
+                        double t = (markerIndex - sectionStart) / optimiser.IndicesPerMeter / sectionLength;
+                        double markerX = t * (p2x - p1x) + p1x;
+                        double markerY = grad * markerX + intercept;
+                        //System.Console.WriteLine($"Marker {markerIndex}: offset {offset}");
+
+                        //var (markerX, markerY) = optimiser.ApplyRacingLineOffset(markerIndex, offset);
                         markers.Add(new Marker
                         {
                             X = markerX,

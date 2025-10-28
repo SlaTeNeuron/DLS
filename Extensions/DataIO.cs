@@ -309,6 +309,41 @@ namespace DLS.Extensions
             Console.WriteLine($"Speed data exported ({racingLine.Length} points) in {(DateTime.Now - DateTime.Now).TotalMilliseconds:F1} ms");
         }
 
+        public static void ExportOptimizationMarkers(this AccelerationOptimiser optimiser, string outputPath = "OutputData/RacingLineMarkers.csv")
+        {
+            var markers = optimiser.OptimizationMarkers;
+            var trackCentre = optimiser.TrackCentre;
+            
+            if (markers == null || markers.Length == 0)
+                throw new InvalidOperationException("Optimization markers must be generated first.");
+
+            string? directory = Path.GetDirectoryName(outputPath);
+            if (!string.IsNullOrEmpty(directory) && !Directory.Exists(directory))
+            {
+                Directory.CreateDirectory(directory);
+            }
+
+            using (var writer = new StreamWriter(outputPath))
+            {
+                writer.WriteLine("Index,X,Y,Type,Description");
+
+                for (int i = 0; i < markers.Length; i++)
+                {
+                    var marker = markers[i];
+                    
+                    // Generate a description based on the marker type and properties
+                    string description = GenerateMarkerDescription(optimiser, marker, i, trackCentre);
+                    
+                    // Use the cumulative distance as index, or fall back to array index
+                    int index = (int)Math.Min(Math.Round(marker.CumulativeDistance * 100), trackCentre.Length - 1); // Convert to centimeters for index
+                    
+                    writer.WriteLine($"{index},{marker.X:F6},{marker.Y:F6},{marker.Type ?? "Unknown"},\"{description}\"");
+                }
+            }
+
+            Console.WriteLine($"Optimization markers exported ({markers.Length} points) to {outputPath}");
+        }
+
         #endregion
 
         #region Helper Methods
@@ -520,6 +555,50 @@ namespace DLS.Extensions
             string cacheFileName = $"{fileNameWithoutExt}_{hashString}.cache.csv";
 
             return Path.Combine(directory, cacheFileName);
+        }
+
+        private static string GenerateMarkerDescription(this AccelerationOptimiser optimiser, Marker marker, int markerNum, LineData[]? trackCentre)
+        {
+            string description = "";
+            
+            switch (marker.Type?.ToLower())
+            {
+                case "entry":
+                    description = "Turn Entry";
+                    break;
+                case "exit":
+                    description = "Turn Exit";
+                    break;
+                case "segment":
+                    description = "Intermediate";
+                    if (marker.MarkerNumber.HasValue)
+                        description += $" @{marker.MarkerNumber.Value * 22.5:F1}° ({marker.MarkerNumber}/{32})";
+                    break;
+                case "straight":
+                    description = "Straight Section";
+                    break;
+                case "chicane transition":
+                    description = "Chicane Transition";
+                    break;
+                default:
+                    if (markerNum == 0)
+                        description = "Start";
+                    else
+                        description = marker.Type ?? "Unknown";
+                    break;
+            }
+
+            // Add additional context if available
+            if (trackCentre != null && markerNum <= Math.Ceiling(trackCentre.Length / optimiser.IndicesPerMeter * optimiser.MarkersPerMeter))
+            {
+                if (Math.Abs(trackCentre[(int)Math.Min(trackCentre.Length - 1, Math.Round(markerNum * optimiser.IndicesPerMeter / optimiser.MarkersPerMeter, 0))].Curvature) < 0.01)
+                    description += " (Straight)";
+                else if (trackCentre[(int)Math.Round(markerNum * optimiser.IndicesPerMeter / optimiser.MarkersPerMeter, 0)].Curvature > 0)
+                    description += " (Right Turn)";
+                else
+                    description += " (Left Turn)";
+            }
+            return description;
         }
 
         #endregion
