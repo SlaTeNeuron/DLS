@@ -85,17 +85,27 @@ namespace DLS.Extensions
                 profile.Speeds[i] = terminalSpeedMs;
             }
 
-            for (int i = turn.ApexIndex - 1; i >= 0 && Math.Abs(racingLine[i].Curvature) >= Math.Abs(turn.MaxCurvature * 0.05); i--)
+            // Determine true start and end indices based on curvature threshold
+            for (int i = turn.StartIndex; i <= turn.ApexIndex; i++)
             {
-                trueStartIndex = i;
                 maxBrakeCurveIndex = Math.Abs(racingLine[i].Curvature) > Math.Abs(racingLine[maxBrakeCurveIndex].Curvature) ? i : maxBrakeCurveIndex;
             }
-            for (int i = turn.ApexIndex + 1; i < racingLine.Length && Math.Abs(racingLine[i].Curvature) >= Math.Abs(turn.MaxCurvature * 0.05); i++)
+            for (int i = turn.ApexIndex; i <= turn.EndIndex; i++)
             {
-                trueEndIndex = i;
                 maxAccelCurveIndex = Math.Abs(racingLine[i].Curvature) > Math.Abs(racingLine[maxAccelCurveIndex].Curvature) ? i : maxAccelCurveIndex;
             }
 
+            for (int i = maxBrakeCurveIndex - 1; i >= 0 && Math.Abs(racingLine[i].Curvature) >= Math.Abs(turn.MaxCurvature * 0.05); i--)
+            {
+                trueStartIndex = i;
+            }
+            for (int i = maxAccelCurveIndex + 1; i < racingLine.Length && Math.Abs(racingLine[i].Curvature) >= Math.Abs(turn.MaxCurvature * 0.05); i++)
+            {
+                trueEndIndex = i;
+            }
+
+
+            System.Console.WriteLine($"Turn {profile.TurnIndex + 1}: True start index {trueStartIndex}, True end index {trueEndIndex}, Max curvature: {turn.MaxCurvature}");
             // Calculate curvature-limited speeds
             for (int i = trueStartIndex; i <= trueEndIndex; i++)
             {
@@ -123,7 +133,7 @@ namespace DLS.Extensions
                     double availableLongitudinalG = optimiser.GetMaxLongitudinalGForLateralG(requiredLateralG, Math.Abs(racingLine[i].Curvature) < Math.Abs(racingLine[i + 1].Curvature));
 
                     double maxSpeed = Math.Sqrt(
-                        profile.Speeds[i + 1] * profile.Speeds[i + 1] -
+                        profile.Speeds[i + 1] * profile.Speeds[i + 1] +
                         2 * availableLongitudinalG * 9.81 * distance);
 
                     profile.Speeds[i] = Math.Min(profile.Speeds[i], maxSpeed);
@@ -144,7 +154,7 @@ namespace DLS.Extensions
                         requiredLateralG = profile.Speeds[i - 1] * profile.Speeds[i - 1] * curvature / 9.81;
                     }
 
-                    double availableAccelG = optimiser.GetMaxLongitudinalGForLateralG(requiredLateralG, Math.Abs(racingLine[i].Curvature) > Math.Abs(racingLine[i - 1].Curvature));
+                    double availableAccelG = optimiser.GetMaxLongitudinalGForLateralG(requiredLateralG, Math.Abs(racingLine[i].Curvature) < Math.Abs(racingLine[i - 1].Curvature));
 
                     double maxSpeedFromAccel = Math.Sqrt(
                         profile.Speeds[i - 1] * profile.Speeds[i - 1] +

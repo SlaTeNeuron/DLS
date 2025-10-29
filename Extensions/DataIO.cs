@@ -319,7 +319,7 @@ namespace DLS.Extensions
 
             using (var writer = new StreamWriter(outputPath))
             {
-                writer.WriteLine("Index,X,Y,Type,Description");
+                writer.WriteLine("Index,X,Y,CumulativeDistance,Description");
 
                 for (int i = 0; i < markers.Length; i++)
                 {
@@ -331,7 +331,7 @@ namespace DLS.Extensions
                     // Use the cumulative distance as index, or fall back to array index
                     int index = (int)Math.Min(Math.Round(marker.CumulativeDistance * 100), trackCentre.Length - 1); // Convert to centimeters for index
                     
-                    writer.WriteLine($"{index},{marker.X:F6},{marker.Y:F6},{marker.Type ?? "Unknown"},\"{description}\"");
+                    writer.WriteLine($"{index},{marker.X:F6},{marker.Y:F6},{marker.CumulativeDistance:F2},\"{description}\"");
                 }
             }
 

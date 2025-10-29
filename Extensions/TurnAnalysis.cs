@@ -269,18 +269,18 @@ namespace DLS.Extensions
 
                 if (turn.IsChicaneStart)
                 {
-                    entryMarker = (int)Math.Ceiling(turn.StartIndex * optimiser.MarkersPerMeter / optimiser.IndicesPerMeter);
-                    exitMarker = (int)Math.Floor(turn.ApexIndex * optimiser.MarkersPerMeter / optimiser.IndicesPerMeter);
+                    entryMarker = (int)Math.Ceiling(trackCentre[turn.StartIndex].CumulativeDistance * optimiser.MarkersPerMeter);
+                    exitMarker = (int)Math.Floor(trackCentre[turn.ApexIndex].CumulativeDistance * optimiser.MarkersPerMeter) - 0;
                 }
                 else if (turn.IsChicaneEnd)
                 {
-                    entryMarker = (int)Math.Ceiling(turn.ApexIndex * optimiser.MarkersPerMeter / optimiser.IndicesPerMeter);
-                    exitMarker = (int)Math.Floor(turn.EndIndex * optimiser.MarkersPerMeter / optimiser.IndicesPerMeter);
+                    entryMarker = (int)Math.Ceiling(trackCentre[turn.ApexIndex].CumulativeDistance * optimiser.MarkersPerMeter) + 0;
+                    exitMarker = (int)Math.Floor(trackCentre[turn.EndIndex].CumulativeDistance * optimiser.MarkersPerMeter);
                 }
                 else
                 {
-                    entryMarker = (int)Math.Ceiling(turn.StartIndex * optimiser.MarkersPerMeter / optimiser.IndicesPerMeter);
-                    exitMarker = (int)Math.Floor(turn.EndIndex * optimiser.MarkersPerMeter / optimiser.IndicesPerMeter);
+                    entryMarker = (int)Math.Ceiling(trackCentre[turn.StartIndex].CumulativeDistance * optimiser.MarkersPerMeter);
+                    exitMarker = (int)Math.Floor(trackCentre[turn.EndIndex].CumulativeDistance * optimiser.MarkersPerMeter);
                 }
                 int entryIndex = (int)(entryMarker * optimiser.IndicesPerMeter / optimiser.MarkersPerMeter);
                 int exitIndex = (int)(exitMarker * optimiser.IndicesPerMeter / optimiser.MarkersPerMeter);
@@ -312,7 +312,7 @@ namespace DLS.Extensions
                 {
                     for (int seg = 1; seg < markerCount - 1; seg++)
                     {
-                        int bestIndex = (int)((entryMarker + seg) * optimiser.IndicesPerMeter / optimiser.MarkersPerMeter);
+                        int bestIndex = (int)(entryIndex + seg * optimiser.IndicesPerMeter / optimiser.MarkersPerMeter);
                         double segmentOffset;
 
                         if (bestIndex < turn.ApexIndex)
@@ -336,7 +336,7 @@ namespace DLS.Extensions
                             Y = segmentY,
                             CumulativeDistance = trackCentre[bestIndex].CumulativeDistance,
                             TangentDirection = trackCentre[bestIndex].TangentDirection,
-                            MarkerNumber = entryMarker + seg,
+                            MarkerNumber = (int)(entryIndex / optimiser.IndicesPerMeter * optimiser.MarkersPerMeter + seg),
                             Type = "Corner Segment"
                         });
                     }
@@ -428,8 +428,8 @@ namespace DLS.Extensions
                 else if (turns[i].IsChicaneEnd && turns[i - 1].IsChicaneStart)
                 {
                     // Chicane section: between two chicanes
-                    sectionStart = turns[i - 1].ApexIndex;
-                    sectionEnd = turns[i].ApexIndex;
+                    sectionStart = turns[i - 1].ApexIndex - 0 * (int)Math.Round(optimiser.IndicesPerMeter / optimiser.MarkersPerMeter);
+                    sectionEnd = turns[i].ApexIndex + 0 * (int)Math.Round(optimiser.IndicesPerMeter / optimiser.MarkersPerMeter);
                     startOffset = turns[i - 1].Direction == "Right" ? 1.0 : -1.0;
                     endOffset = turns[i].Direction == "Right" ? 1.0 : -1.0;
                 }
@@ -449,10 +449,10 @@ namespace DLS.Extensions
                 if (sectionLength > 5.0 || i == 0 || i == turns.Count)
                 {
                     //System.Console.WriteLine($"startOffset: {startOffset}, endOffset: {endOffset}");
-                    int firstMarker = (int)Math.Ceiling(sectionStart / optimiser.IndicesPerMeter * optimiser.MarkersPerMeter);
-                    int lastMarker = (int)Math.Floor(sectionEnd / optimiser.IndicesPerMeter * optimiser.MarkersPerMeter);
+                    int firstMarker = (int)Math.Ceiling(trackCentre[sectionStart].CumulativeDistance * optimiser.MarkersPerMeter);
+                    int lastMarker = (int)Math.Floor(trackCentre[sectionEnd].CumulativeDistance * optimiser.MarkersPerMeter);
                     int refPoint1 = 0, refPoint2 = 0;
-                    int index1 = 10000;
+                    int index1 = trackCentre.Length * optimiser.MarkersPerMeter + 1;
                     int index2 = 0;
                     for (int m = 0; m < originalMarkerCount+2; m++)
                     {
@@ -471,7 +471,9 @@ namespace DLS.Extensions
                     }
                     //System.Console.WriteLine(firstMarker + " to " + lastMarker);
                     //System.Console.WriteLine(refPoint1 + ", " + refPoint2);
+                    //System.Console.WriteLine(markers[refPoint1].CumulativeDistance + " to " + markers[refPoint2].CumulativeDistance);
                     int numMarkers = lastMarker - firstMarker + 1;
+                    //System.Console.WriteLine(numMarkers + " straight markers from " + markers[refPoint1].CumulativeDistance + " to " + markers[refPoint2].CumulativeDistance);
                     double p1x = markers[refPoint1].X;
                     double p1y = markers[refPoint1].Y;
                     double p2x = markers[refPoint2].X;
@@ -479,12 +481,15 @@ namespace DLS.Extensions
                     double grad = (p2y - p1y) / (p2x - p1x);
                     double intercept = p1y - grad * p1x;
                     int markerCount = 0;
+                    sectionLength = Math.Sqrt((p2x - p1x) * (p2x - p1x) + (p2y - p1y) * (p2y - p1y));
                     //System.Console.WriteLine(p1x + ", " + p1y + " to " + p2x + ", " + p2y);
 
                     for (int j = 0; j < numMarkers; j++)
                     {
-                        int markerIndex = (int)Math.Floor((firstMarker + j) * optimiser.IndicesPerMeter / optimiser.MarkersPerMeter);
-                        double t = (markerIndex - sectionStart) / optimiser.IndicesPerMeter / sectionLength;
+                        int markerIndex = (int)Math.Round((firstMarker + j) * optimiser.IndicesPerMeter / optimiser.MarkersPerMeter);
+                        double t = (j + 1.0) / (numMarkers + 1.0);
+                        //System.Console.WriteLine(j + " of " + numMarkers);
+                        //System.Console.WriteLine(t*100+"% along straight section");
                         double markerX = t * (p2x - p1x) + p1x;
                         double markerY = grad * markerX + intercept;
                         //System.Console.WriteLine($"Marker {markerIndex}: offset {offset}");
