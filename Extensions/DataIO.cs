@@ -99,8 +99,13 @@ namespace DLS.Extensions
 
             if (File.Exists(cachedDataPath))
             {
-                optimiser.LoadProcessedTrackData(cachedDataPath);
-                return;
+                Console.Write("Cached file detected do you want to use the data previously computed from this track?\n[Y/N]: ");
+                string? input = Console.ReadLine();
+                if (input?.Trim().ToUpper() == "Y")
+                {
+                    optimiser.LoadProcessedTrackData(cachedDataPath);
+                    return;
+                }
             }
 
             string[] lines = File.ReadAllLines(filePath);
@@ -109,57 +114,46 @@ namespace DLS.Extensions
 
             int dataRows = lines.Length - 1;
             var trackCentre = new LineData[dataRows];
+            int xIndex = -1;
+            int yIndex = -1;
+            bool isLatLon = false;
 
-            string[] firstDataValues = lines[1].Split(',');
-            bool isXYOnlyFormat = firstDataValues.Length == 2;
-            bool isFullFormat = firstDataValues.Length >= 5;
-
-            if (isXYOnlyFormat)
+            string[] firstDataValues = lines[0].Split(',');
+            for (int i = 0; i < firstDataValues.Length; i++)
             {
-                // Parse X,Y coordinates only and calculate derived properties
-                for (int i = 1; i <= dataRows; i++)
+                firstDataValues[i] = firstDataValues[i].Trim().ToLower();
+                //System.Console.WriteLine(firstDataValues[i]);
+                if (firstDataValues[i] == "x" || firstDataValues[i] == "lat") xIndex = i;
+                if (firstDataValues[i] == "y" || firstDataValues[i] == "lon") yIndex = i;
+                if (firstDataValues[i] == "lon") isLatLon = true; // Support for 'Longitude' header
+            }
+            if (xIndex == -1 || yIndex == -1)
+                throw new InvalidDataException("File header must contain 'X' and 'Y' columns or 'Lat' and 'Lon' columns.");
+
+            System.Console.WriteLine(isLatLon ? "Detected Latitude/Longitude format" : "Detected X/Y coordinate format");
+
+            double x0 = ParseDoubleWithFallback(lines[1].Split(',')[xIndex], 0.0, $"X at line {1}");
+            double y0 = ParseDoubleWithFallback(lines[1].Split(',')[yIndex], 0.0, $"Y at line {1}");
+
+            // Parse X,Y coordinates only and calculate derived properties
+            for (int i = 1; i <= dataRows; i++)
+            {
+                string[] values = lines[i].Split(',');
+                if (values.Length < 2) continue;
+
+                int arrayIndex = i - 1;
+                trackCentre[arrayIndex] = new LineData
                 {
-                    string[] values = lines[i].Split(',');
-                    if (values.Length < 2) continue;
-
-                    int arrayIndex = i - 1;
-                    trackCentre[arrayIndex] = new LineData
-                    {
-                        X = ParseDoubleWithFallback(values[0], 0.0, $"X at line {i}"),
-                        Y = ParseDoubleWithFallback(values[1], 0.0, $"Y at line {i}"),
-                        CumulativeDistance = 0.0,
-                        Curvature = 0.0,
-                        TangentDirection = 0.0
-                    };
-                }
-                optimiser.SetTrackCentre(trackCentre);
-                optimiser.CalculateTrackProperties();
-                optimiser.SaveProcessedTrackData(cachedDataPath);
+                    X = isLatLon ? 113200 * (ParseDoubleWithFallback(values[xIndex], 0.0, $"X at line {i}") - x0) : ParseDoubleWithFallback(values[xIndex], 0.0, $"X at line {i}") - x0,
+                    Y = isLatLon ? 113200 * Math.Cos(y0 * Math.PI / 180) * (ParseDoubleWithFallback(values[yIndex], 0.0, $"Y at line {i}") - y0) : ParseDoubleWithFallback(values[yIndex], 0.0, $"Y at line {i}") - y0,
+                    CumulativeDistance = 0.0,
+                    Curvature = 0.0,
+                    TangentDirection = 0.0
+                };
             }
-            else if (isFullFormat)
-            {
-                // Parse all values directly
-                for (int i = 1; i <= dataRows; i++)
-                {
-                    string[] values = lines[i].Split(',');
-                    if (values.Length < 5) continue;
-
-                    int arrayIndex = i - 1;
-                    trackCentre[arrayIndex] = new LineData
-                    {
-                        X = ParseDoubleWithFallback(values[0], 0.0, $"X at line {i}"),
-                        Y = ParseDoubleWithFallback(values[1], 0.0, $"Y at line {i}"),
-                        CumulativeDistance = ParseDoubleWithFallback(values[2], 0.0, $"CumulativeDistance at line {i}"),
-                        Curvature = ParseDoubleWithFallback(values[3], 0.0, $"Curvature at line {i}"),
-                        TangentDirection = ParseDoubleWithFallback(values[4], 0.0, $"TangentDirection at line {i}")
-                    };
-                }
-                optimiser.SetTrackCentre(trackCentre);
-            }
-            else
-            {
-                throw new InvalidDataException($"Unsupported file format. Expected 2 columns (X,Y) or 5+ columns. Found {firstDataValues.Length} columns.");
-            }
+            optimiser.SetTrackCentre(trackCentre);
+            optimiser.CalculateTrackProperties();
+            optimiser.SaveProcessedTrackData(cachedDataPath);
         }
 
         #endregion
@@ -593,7 +587,7 @@ namespace DLS.Extensions
             {
                 if (Math.Abs(trackCentre[(int)Math.Min(trackCentre.Length - 1, Math.Round(markerNum * optimiser.IndicesPerMeter / optimiser.MarkersPerMeter, 0))].Curvature) < 0.01)
                     description += " (Straight)";
-                else if (trackCentre[(int)Math.Round(markerNum * optimiser.IndicesPerMeter / optimiser.MarkersPerMeter, 0)].Curvature > 0)
+                else if (trackCentre[(int)Math.Min(Math.Round(markerNum * optimiser.IndicesPerMeter / optimiser.MarkersPerMeter, 0), trackCentre.Length - 1)].Curvature > 0)
                     description += " (Right Turn)";
                 else
                     description += " (Left Turn)";
