@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Runtime.Intrinsics.Arm;
 using DLS.Structures;
 
 namespace DLS.Extensions
@@ -36,10 +37,10 @@ namespace DLS.Extensions
             Console.WriteLine($"Spline interpolates through {keyPoints.Count} key points from optimization markers");
         }
 
-        private static List<(int index, double x, double y, string type)> GenerateKeyRacingPoints(AccelerationOptimiser optimiser)
+        private static List<(int index, double x, double y, double tangentDirection, string type)> GenerateKeyRacingPoints(AccelerationOptimiser optimiser)
         {
             // Use the optimization markers that were already generated
-            var keyPoints = new List<(int index, double x, double y, string type)>();
+            var keyPoints = new List<(int index, double x, double y, double tangentDirection, string type)>();
             var trackCentre = optimiser.TrackCentre;
             var optimizationMarkers = optimiser.OptimizationMarkers;
 
@@ -55,7 +56,7 @@ namespace DLS.Extensions
                     // Find corresponding track index by cumulative distance
                     int trackIndex = FindClosestTrackIndex(marker, trackCentre);
 
-                    keyPoints.Add((trackIndex, marker.X, marker.Y, marker.Type + " " + marker.MarkerNumber.ToString()));
+                    keyPoints.Add((trackIndex, marker.X, marker.Y, marker.TangentDirection, marker.Type + " " + marker.MarkerNumber.ToString()));
                 }
             }
             else
@@ -70,15 +71,18 @@ namespace DLS.Extensions
                     {
                         // Entry point
                         var (entryX, entryY) = optimiser.ApplyRacingLineOffset(turn.StartIndex, -0.5);
-                        keyPoints.Add((turn.StartIndex, entryX, entryY, $"Turn Entry"));
+                        double entryTangent = trackCentre[turn.StartIndex].TangentDirection;
+                        keyPoints.Add((turn.StartIndex, entryX, entryY, entryTangent, $"Turn Entry"));
 
                         // Apex point
                         var (apexX, apexY) = optimiser.ApplyRacingLineOffset(turn.ApexIndex, 0.5);
-                        keyPoints.Add((turn.ApexIndex, apexX, apexY, $"Turn Apex"));
+                        double apexTangent = trackCentre[turn.ApexIndex].TangentDirection;
+                        keyPoints.Add((turn.ApexIndex, apexX, apexY, apexTangent, $"Turn Apex"));
 
                         // Exit point
                         var (exitX, exitY) = optimiser.ApplyRacingLineOffset(turn.EndIndex, -0.5);
-                        keyPoints.Add((turn.EndIndex, exitX, exitY, $"Turn Exit"));
+                        double exitTangent = trackCentre[turn.EndIndex].TangentDirection;
+                        keyPoints.Add((turn.EndIndex, exitX, exitY, exitTangent, $"Turn Exit"));
                     }
                 }
             }
@@ -89,20 +93,20 @@ namespace DLS.Extensions
 
             if (!hasStart)
             {
-                keyPoints.Insert(0, (0, trackCentre[0].X, trackCentre[0].Y, "Start"));
+                keyPoints.Insert(0, (0, trackCentre[0].X, trackCentre[0].Y, trackCentre[0].TangentDirection, "Start"));
             }
 
             if (!hasEnd)
             {
                 int lastIndex = trackCentre.Length - 1;
-                keyPoints.Add((lastIndex, trackCentre[lastIndex].X, trackCentre[lastIndex].Y, "Finish"));
+                keyPoints.Add((lastIndex, trackCentre[lastIndex].X, trackCentre[lastIndex].Y, trackCentre[lastIndex].TangentDirection, "Finish"));
             }
 
             // Sort by track index
             keyPoints.Sort((a, b) => a.index.CompareTo(b.index));
 
             // Remove duplicates
-            var uniqueKeyPoints = new List<(int index, double x, double y, string type)>();
+            var uniqueKeyPoints = new List<(int index, double x, double y, double tangentDirection, string type)>();
             int lastAddedIndex = -1;
 
             foreach (var point in keyPoints)
@@ -116,7 +120,7 @@ namespace DLS.Extensions
 
             return uniqueKeyPoints;
         }
-        private static LineData[] InterpolateSplineRacingLine(this AccelerationOptimiser optimiser, List<(int index, double x, double y, string type)> keyPoints, LineData[] trackCentre)
+        private static LineData[] InterpolateSplineRacingLine(this AccelerationOptimiser optimiser, List<(int index, double x, double y, double tangentDirection, string type)> keyPoints, LineData[] trackCentre)
         {
             if (keyPoints.Count < 2)
                 throw new ArgumentException("Need at least 2 key points for spline interpolation");
@@ -125,6 +129,7 @@ namespace DLS.Extensions
             
             var racingLine = new LineData[trackCentre.Length];
             var sortedKeyPoints = keyPoints.OrderBy(p => p.index).ToList();
+            int lastSegmentIndex = -1;
 
             // Use Catmull-Rom spline interpolation
             for (int i = 0; i < trackCentre.Length; i++)
@@ -140,8 +145,10 @@ namespace DLS.Extensions
                 else
                 {
                     var (x, y) = CatmullRomInterpolate(i, segmentIndex, sortedKeyPoints);
+                    //var (x, y , last) = BezierInterpolate(i, segmentIndex, sortedKeyPoints, lastSegmentIndex);
                     racingX = x;
                     racingY = y;
+                    //lastSegmentIndex = last;
                 }
 
                 racingLine[i] = new LineData
@@ -160,7 +167,7 @@ namespace DLS.Extensions
             return racingLine;
         }
 
-        private static int FindSplineSegment(int trackIndex, List<(int index, double x, double y, string type)> keyPoints)
+        private static int FindSplineSegment(int trackIndex, List<(int index, double x, double y, double tangentDirection, string type)> keyPoints)
         {
             for (int j = 1; j < keyPoints.Count - 2; j++)
             {
@@ -172,7 +179,7 @@ namespace DLS.Extensions
             return -1;
         }
 
-        private static double LinearInterpolate(int trackIndex, List<(int index, double x, double y, string type)> keyPoints, out double y)
+        private static double LinearInterpolate(int trackIndex, List<(int index, double x, double y, double tangentDirection, string type)> keyPoints, out double y)
         {
             if (trackIndex <= keyPoints[0].index)
             {
@@ -211,8 +218,8 @@ namespace DLS.Extensions
             return keyPoints[0].x;
         }
 
-        private static (double x, double y) CatmullRomInterpolate(int trackIndex, int segmentIndex, 
-                                                                List<(int index, double x, double y, string type)> keyPoints)
+        private static (double x, double y) CatmullRomInterpolate(int trackIndex, int segmentIndex,
+                                                                List<(int index, double x, double y, double tangentDirection, string type)> keyPoints)
         {
             var p0 = keyPoints[segmentIndex - 1];
             var p1 = keyPoints[segmentIndex];
@@ -244,6 +251,73 @@ namespace DLS.Extensions
                               (-p0.y + 3.0 * p1.y - 3.0 * p2.y + p3.y) * t3);
 
             return (x, y);
+        }
+
+        private static (double x, double y, int lastSegmentIndex) BezierInterpolate(int trackIndex, int segmentIndex,
+                                                                List<(int index, double x, double y, double tangentDirection, string type)> keyPoints, int lastSegmentIndex = -1)
+        {
+            var p0 = keyPoints[segmentIndex];
+            var p1 = keyPoints[segmentIndex + 1];
+            var theta0 = p0.tangentDirection;
+            var theta1 = p1.tangentDirection;
+            if (lastSegmentIndex != segmentIndex)
+            {
+                System.Console.WriteLine($"Slopes for segment {segmentIndex}: theta0 = {theta0:F2}, theta1 = {theta1:F2}");
+            }
+            var m0 = Math.Tan(Math.PI / 2 - theta0);
+            var m1 = Math.Tan(Math.PI / 2 - theta1);
+            var c0 = p0.y - m0 * p0.x;
+            var c1 = p1.y - m1 * p1.x;
+            var pmx = (c1 - c0) / (m0 - m1);
+            var pmy = m0 * pmx + c0;
+            var simpleGrad = (p1.y - p0.y) / (p1.x - p0.x);
+
+            if (lastSegmentIndex != segmentIndex)
+            {
+                System.Console.WriteLine(((pmx < p0.x && pmx < p1.x) || (pmx > p0.x && pmx > p1.x))||((pmy < p0.y && pmy < p1.y) || (pmy > p0.y && pmy > p1.y)));
+                System.Console.WriteLine($"Bezier control points for segment {segmentIndex}: (p0)({p0.x:F2}, {p0.y:F2}), (pm)({pmx:F2}, {pmy:F2}), (p1)({p1.x:F2}, {p1.y:F2})");
+            }
+
+            if ((pmx < p0.x && pmx < p1.x) || (pmx > p0.x && pmx > p1.x))
+            {
+                pmx = 0.5 * (p0.x + p1.x);
+                pmy = simpleGrad * pmx + p0.y - simpleGrad * p0.x;
+            }
+            else if ((pmy < p0.y && pmy < p1.y) || (pmy > p0.y && pmy > p1.y))
+            {
+                pmx = 0.5 * (p0.x + p1.x);
+                pmy = simpleGrad * pmx + p0.y - simpleGrad * p0.x;
+            }
+
+            if (lastSegmentIndex != segmentIndex)
+            {
+                System.Console.WriteLine(((pmx < p0.x && pmx < p1.x) || (pmx > p0.x && pmx > p1.x))||((pmy < p0.y && pmy < p1.y) || (pmy > p0.y && pmy > p1.y)));
+                System.Console.WriteLine($"Bezier control points for segment {segmentIndex}: (p0)({p0.x:F2}, {p0.y:F2}), (pm)({pmx:F2}, {pmy:F2}), (p1)({p1.x:F2}, {p1.y:F2})");
+                lastSegmentIndex = segmentIndex;
+            }
+
+            var pm = (x: pmx, y: pmy);
+
+            double t;
+            if (p1.index == p0.index)
+            {
+                t = 0.0;
+            }
+            else
+            {
+                t = (double)(trackIndex - p0.index) / (p1.index - p0.index);
+                t = Math.Max(0.0, Math.Min(1.0, t));
+            }
+
+            double x = (1 - t) * (1 - t) * p0.x +
+                              2 * (1-t) * t * pm.x +
+                              t * t * p1.x;
+
+            double y = (1 - t) * (1 - t) * p0.y +
+                              2 * (1-t) * t * pm.y +
+                              t * t * p1.y;
+
+            return (x, y, lastSegmentIndex);
         }
 
         private static void CalculateRacingLineProperties(this AccelerationOptimiser optimiser, LineData[] racingLine)
