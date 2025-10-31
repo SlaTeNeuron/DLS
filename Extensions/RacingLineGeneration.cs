@@ -253,6 +253,45 @@ namespace DLS.Extensions
             return (x, y);
         }
 
+        private static (double x, double y) newCatmullRomInterpolate(int trackIndex, int segmentIndex,
+                                                                List<(int index, double x, double y, double tangentDirection, string type)> keyPoints)
+        {
+            var p0 = keyPoints[segmentIndex - 1];
+            var p1 = keyPoints[segmentIndex];
+            var p2 = keyPoints[segmentIndex + 1];
+            var p3 = keyPoints[segmentIndex + 2];
+
+            var m1 = (x: 1, y: 0.5 * ((p2.y - p1.y) / (p2.x - p1.x) + (p1.y - p0.y) / (p1.x - p0.x)));
+            var m2 = (x: 1, y: 0.5 * ((p3.y - p2.y) / (p3.x - p2.x) + (p2.y - p1.y) / (p2.x - p1.x)));
+
+            double t;
+            if (p2.index == p1.index)
+            {
+                t = 0.0;
+            }
+            else
+            {
+                t = (double)(trackIndex - p1.index) / (p2.index - p1.index);
+                t = Math.Max(0.0, Math.Min(1.0, t));
+            }
+            System.Console.WriteLine($"Catmull-Rom t for track index {trackIndex} between key points {segmentIndex} and {segmentIndex + 1}: t = {t:F2}");
+
+            double t2 = t * t;
+            double t3 = t2 * t;
+
+            double x =  (2.0 * t3 - 3.0 * t2 + 1.0) * p1.x +
+                        (t3 - 2.0 * t2 + t) * m1.x +
+                        (-2.0 * t3 + 3.0 * t2) * p2.x +
+                        (t3 - t2) * m2.x;
+
+            double y =  (2.0 * t3 - 3.0 * t2 + 1.0) * p1.y +
+                        (t3 - 2.0 * t2 + t) * m1.y +
+                        (-2.0 * t3 + 3.0 * t2) * p2.y +
+                        (t3 - t2) * m2.y;
+
+            return (x, y);
+        }
+
         private static (double x, double y, int lastSegmentIndex) BezierInterpolate(int trackIndex, int segmentIndex,
                                                                 List<(int index, double x, double y, double tangentDirection, string type)> keyPoints, int lastSegmentIndex = -1)
         {
@@ -323,6 +362,13 @@ namespace DLS.Extensions
         private static void CalculateRacingLineProperties(this AccelerationOptimiser optimiser, LineData[] racingLine)
         {
             int n = racingLine.Length;
+            double maxAbsCurvature = 0.0;
+            for (int i = 0; i < optimiser.Turns.Count; i++)
+            {
+                var turn = optimiser.Turns[i];
+                if (Math.Abs(turn.MaxCurvature) > maxAbsCurvature)
+                    maxAbsCurvature = Math.Abs(turn.MaxCurvature);    
+            }
             
             // Calculate cumulative distances
             racingLine[0].CumulativeDistance = 0.0;
@@ -337,8 +383,8 @@ namespace DLS.Extensions
             // Calculate tangent directions and curvature
             for (int i = 0; i < n; i++)
             {
-                int prevIndex = (int)Math.Max(0, i - 0.05 * optimiser.IndicesPerMeter);
-                int nextIndex = (int)Math.Min(n - 1, i + 0.05 * optimiser.IndicesPerMeter);
+                int prevIndex = (int)Math.Max(0, i - 0.5 * optimiser.IndicesPerMeter);
+                int nextIndex = (int)Math.Min(n - 1, i + 0.5 * optimiser.IndicesPerMeter);
 
                 double dx = racingLine[nextIndex].X - racingLine[prevIndex].X;
                 double dy = racingLine[nextIndex].Y - racingLine[prevIndex].Y;
@@ -377,7 +423,7 @@ namespace DLS.Extensions
                     if (a > 1e-10 && b > 1e-10 && c > 1e-10 && area > 1e-10)
                     {
                         double radius = (a * b * c) / (4.0 * area);
-                        racingLine[i].Curvature = 1.0 / radius;
+                        racingLine[i].Curvature = Math.Min(1.0 / radius, 1.2 * maxAbsCurvature);
 
                         double v1x = x2 - x1, v1y = y2 - y1;
                         double v2x = x3 - x2, v2y = y3 - y2;

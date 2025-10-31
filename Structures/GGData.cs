@@ -12,8 +12,8 @@ namespace DLS.Structures
         // Helper method to calculate X,Y components from magnitude and angle
         public (double x, double y) GetXYComponents()
         {
-            double x = Magnitude * Math.Cos(Angle);  // Longitudinal (forward/backward)
-            double y = Magnitude * Math.Sin(Angle);  // Lateral (right/left)
+            double y = Magnitude * Math.Cos(Angle);  // Longitudinal (forward/backward)
+            double x = Magnitude * Math.Sin(Angle);  // Lateral (right/left)
             return (x, y);
         }
         

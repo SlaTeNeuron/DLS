@@ -105,7 +105,7 @@ namespace DLS.Extensions
             }
 
 
-            System.Console.WriteLine($"Turn {profile.TurnIndex + 1}: True start index {trueStartIndex}, True end index {trueEndIndex}, Max curvature: {turn.MaxCurvature}");
+            //System.Console.WriteLine($"Turn {profile.TurnIndex + 1}: True start index {trueStartIndex}, True end index {trueEndIndex}, Max curvature: {turn.MaxCurvature}");
             // Calculate curvature-limited speeds
             for (int i = trueStartIndex; i <= trueEndIndex; i++)
             {
